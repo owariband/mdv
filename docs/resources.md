@@ -77,7 +77,7 @@ Core 不扫描 Markdown AST，不自动下载网络 URL，也不会重写任意�
 
 ## 当前实现状态
 
-M2 已经提供正确的 `baseDirectory`，但尚未发布资源 import/resolve/read API。宿主目前可以读取已有相对资源，不能把自行实现的 sidecar 写入逻辑当作稳定 Core 契约。
+M3 已经提供正确的 `baseDirectory` 和工作副本 save，但尚未发布资源 import/resolve/read API。宿主目前可以读取和保存 Markdown 中已有的相对路径，不能把自行实现的 sidecar 写入逻辑当作稳定 Core 契约。
 
 资源写入依赖可靠的文件事务，将在 M3 主事务闭环之后实现。当前规范性约定见 [Format 0.1：Relative resources](../spec/format-0.1.md#12-relative-resources)。
 

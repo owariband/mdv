@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto'
+import {
+  close as closeFileDescriptor,
+  fstat as statFileDescriptor,
+  open as openFileDescriptor,
+  read as readFileDescriptor,
+} from 'node:fs'
 import { resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 
@@ -32,16 +38,33 @@ export interface ArchiveWarning extends FormatWarning {
   readonly entry: string
 }
 
+export interface ArchiveVersionContent {
+  readonly tree: ArchiveTreeKind
+  readonly versionId: string
+  readonly metadataBytes: Uint8Array
+  readonly bytes: Uint8Array
+}
+
+export interface ArchiveVersionEntry {
+  readonly tree: ArchiveTreeKind
+  readonly versionId: string
+  readonly metadataBytes: number
+  readonly contentBytes: number
+}
+
 export interface OpenedArchive {
   readonly manifest: ManifestFileDto
   readonly referenceHead: string | null
   readonly documentHead: string | null
   readonly referenceVersions: readonly LocatedVersionFileDto<VersionMetaFileDto>[]
   readonly documentVersions: readonly LocatedVersionFileDto<DocumentVersionMetaFileDto>[]
+  readonly versionEntries: readonly ArchiveVersionEntry[]
   readonly warnings: readonly ArchiveWarning[]
 
+  readManifestBytes(): Promise<Uint8Array>
   readWorkingCopy(tree: ArchiveTreeKind): Promise<Uint8Array>
   readVersionContent(tree: ArchiveTreeKind, versionId: string): Promise<Uint8Array>
+  readVersionContents(): AsyncIterable<ArchiveVersionContent>
   close(): Promise<void>
 }
 
@@ -68,6 +91,14 @@ interface VersionPaths {
   content?: yauzl.Entry
 }
 
+interface ClassicZipContainerProfile {
+  readonly centralDirectoryOffset: number
+  readonly centralDirectoryBytes: number
+  readonly totalEntries: number
+}
+
+type ByteRangeReader = (position: number, length: number) => Promise<Buffer>
+
 const VERSION_PATH = /^(ref_tree|doc_tree)\/versions\/(v_[0-9a-f]{32})\/(meta\.json|content\.md)$/
 const VERSION_DIRECTORY = /^(ref_tree|doc_tree)\/versions\/v_[0-9a-f]{32}\/$/
 const ALLOWED_DIRECTORIES = new Set([
@@ -85,6 +116,19 @@ const ALLOWED_FIXED_FILES = new Set([
 ])
 const HEAD = /^v_[0-9a-f]{32}\n$/
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+const CENTRAL_DIRECTORY_HEADER_SIGNATURE = 0x02014b50
+const CENTRAL_DIRECTORY_HEADER_BYTES = 46
+const CENTRAL_DIRECTORY_READ_AHEAD_BYTES = 64 * 1024
+const END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50
+const END_OF_CENTRAL_DIRECTORY_BYTES = 22
+const MAX_ZIP_COMMENT_BYTES = 0xffff
+const ZIP64_LOCATOR_SIGNATURE = 0x07064b50
+const ZIP64_LOCATOR_BYTES = 20
+const ZIP_TRAILER_SEARCH_BYTES = (
+  ZIP64_LOCATOR_BYTES
+  + END_OF_CENTRAL_DIRECTORY_BYTES
+  + MAX_ZIP_COMMENT_BYTES
+)
 
 export async function openArchiveFromBytes(
   bytes: Uint8Array,
@@ -105,8 +149,9 @@ async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<O
   const scanned = await scanEntries(source, limits)
   try {
     const manifestEntry = requireManifestEntry(scanned.entries)
+    const manifestBytes = await readEntryBytes(scanned.zip, manifestEntry, limits.maxJsonBytes)
     const manifestValue = parseJsonEntry(
-      await readEntryBytes(scanned.zip, manifestEntry, limits.maxJsonBytes),
+      manifestBytes,
       'manifest.json',
       limits.maxJsonDepth,
     )
@@ -165,18 +210,34 @@ async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<O
       documentHead,
       referenceVersions,
       documentVersions,
+      [
+        ...versionPaths.document.map((version): ArchiveVersionEntry => Object.freeze({
+          tree: 'document',
+          versionId: version.id,
+          metadataBytes: version.meta.uncompressedSize,
+          contentBytes: version.content.uncompressedSize,
+        })),
+        ...versionPaths.reference.map((version): ArchiveVersionEntry => Object.freeze({
+          tree: 'reference',
+          versionId: version.id,
+          metadataBytes: version.meta.uncompressedSize,
+          contentBytes: version.content.uncompressedSize,
+        })),
+      ],
       warnings,
+      manifestBytes,
       referenceWorkingCopy,
       documentWorkingCopy,
     )
   } finally {
-    scanned.zip.close()
+    await closeZip(scanned.zip, source.kind)
   }
 }
 
 class IndexedArchive implements OpenedArchive {
   readonly referenceVersions: readonly LocatedVersionFileDto<VersionMetaFileDto>[]
   readonly documentVersions: readonly LocatedVersionFileDto<DocumentVersionMetaFileDto>[]
+  readonly versionEntries: readonly ArchiveVersionEntry[]
   readonly warnings: readonly ArchiveWarning[]
   private readonly referenceMeta: ReadonlyMap<string, VersionMetaFileDto>
   private readonly documentMeta: ReadonlyMap<string, DocumentVersionMetaFileDto>
@@ -189,15 +250,22 @@ class IndexedArchive implements OpenedArchive {
     readonly documentHead: string | null,
     referenceVersions: readonly LocatedVersionFileDto<VersionMetaFileDto>[],
     documentVersions: readonly LocatedVersionFileDto<DocumentVersionMetaFileDto>[],
+    versionEntries: readonly ArchiveVersionEntry[],
     warnings: readonly ArchiveWarning[],
+    private readonly manifestBytes: Uint8Array,
     private readonly referenceWorkingCopy: Uint8Array,
     private readonly documentWorkingCopy: Uint8Array,
   ) {
     this.referenceVersions = Object.freeze([...referenceVersions])
     this.documentVersions = Object.freeze([...documentVersions])
+    this.versionEntries = Object.freeze([...versionEntries])
     this.warnings = Object.freeze([...warnings])
     this.referenceMeta = new Map(referenceVersions.map((version) => [version.directoryId, version.meta]))
     this.documentMeta = new Map(documentVersions.map((version) => [version.directoryId, version.meta]))
+  }
+
+  async readManifestBytes(): Promise<Uint8Array> {
+    return Uint8Array.from(this.manifestBytes)
   }
 
   async readWorkingCopy(tree: ArchiveTreeKind): Promise<Uint8Array> {
@@ -215,45 +283,106 @@ class IndexedArchive implements OpenedArchive {
       })
     }
 
-    const entryName = `${tree === 'reference' ? 'ref_tree' : 'doc_tree'}/versions/${versionId}/content.md`
     const scanned = await scanEntries(this.source, this.limits)
     try {
       requireManifestEntry(scanned.entries)
       validateArchiveLayout(scanned.entries)
       requireEntry(scanned.entries, 'ref_tree/current.md')
       requireEntry(scanned.entries, 'doc_tree/current.md')
-      const bytes = await readMarkdownEntry(
-        scanned,
-        requireEntry(scanned.entries, entryName),
-        this.limits.maxEntryBytes,
-      )
-      const actualHash = createHash('sha256').update(bytes).digest('hex')
-      if (bytes.byteLength !== metadata.contentBytes || actualHash !== metadata.contentSha256) {
-        throw new ArchiveError(
-          'INTEGRITY_MISMATCH',
-          `Version content does not match metadata for ${versionId}`,
-          {
-            entry: entryName,
-            details: {
-              tree,
-              versionId,
-              expectedContentBytes: metadata.contentBytes,
-              actualContentBytes: bytes.byteLength,
-              expectedContentSha256: metadata.contentSha256,
-              actualContentSha256: actualHash,
-            },
-          },
-        )
-      }
-      return bytes
+      return await readVerifiedVersionContent(scanned, this.limits, tree, versionId, metadata)
     } finally {
-      scanned.zip.close()
+      await closeZip(scanned.zip, this.source.kind)
+    }
+  }
+
+  async *readVersionContents(): AsyncIterable<ArchiveVersionContent> {
+    const scanned = await scanEntries(this.source, this.limits)
+    try {
+      requireManifestEntry(scanned.entries)
+      validateArchiveLayout(scanned.entries)
+      requireEntry(scanned.entries, 'ref_tree/current.md')
+      requireEntry(scanned.entries, 'doc_tree/current.md')
+
+      for (const version of this.documentVersions) {
+        const metadataEntry = `doc_tree/versions/${version.directoryId}/meta.json`
+        yield {
+          tree: 'document',
+          versionId: version.directoryId,
+          metadataBytes: await readEntryBytes(
+            scanned.zip,
+            requireEntry(scanned.entries, metadataEntry),
+            this.limits.maxJsonBytes,
+          ),
+          bytes: await readVerifiedVersionContent(
+            scanned,
+            this.limits,
+            'document',
+            version.directoryId,
+            version.meta,
+          ),
+        }
+      }
+      for (const version of this.referenceVersions) {
+        const metadataEntry = `ref_tree/versions/${version.directoryId}/meta.json`
+        yield {
+          tree: 'reference',
+          versionId: version.directoryId,
+          metadataBytes: await readEntryBytes(
+            scanned.zip,
+            requireEntry(scanned.entries, metadataEntry),
+            this.limits.maxJsonBytes,
+          ),
+          bytes: await readVerifiedVersionContent(
+            scanned,
+            this.limits,
+            'reference',
+            version.directoryId,
+            version.meta,
+          ),
+        }
+      }
+    } finally {
+      await closeZip(scanned.zip, this.source.kind)
     }
   }
 
   async close(): Promise<void> {
     // Readers do not retain a file descriptor after indexing.
   }
+}
+
+async function readVerifiedVersionContent(
+  scanned: ScannedEntries,
+  limits: ReadLimits,
+  tree: ArchiveTreeKind,
+  versionId: string,
+  metadata: VersionMetaFileDto,
+): Promise<Uint8Array> {
+  const entryName = `${tree === 'reference' ? 'ref_tree' : 'doc_tree'}/versions/${versionId}/content.md`
+  const bytes = await readMarkdownEntry(
+    scanned,
+    requireEntry(scanned.entries, entryName),
+    limits.maxEntryBytes,
+  )
+  const actualHash = createHash('sha256').update(bytes).digest('hex')
+  if (bytes.byteLength !== metadata.contentBytes || actualHash !== metadata.contentSha256) {
+    throw new ArchiveError(
+      'INTEGRITY_MISMATCH',
+      `Version content does not match metadata for ${versionId}`,
+      {
+        entry: entryName,
+        details: {
+          tree,
+          versionId,
+          expectedContentBytes: metadata.contentBytes,
+          actualContentBytes: bytes.byteLength,
+          expectedContentSha256: metadata.contentSha256,
+          actualContentSha256: actualHash,
+        },
+      },
+    )
+  }
+  return bytes
 }
 
 function locateWarnings(
@@ -266,18 +395,11 @@ function locateWarnings(
 async function scanEntries(source: ArchiveSource, limits: ReadLimits): Promise<ScannedEntries> {
   let zip: yauzl.ZipFile
   try {
-    zip = source.kind === 'path'
-      ? await yauzl.openPromise(source.path, {
-          autoClose: false,
-          strictFileNames: true,
-          validateEntrySizes: true,
-        })
-      : await yauzl.fromBufferPromise(source.bytes, {
-          autoClose: false,
-          strictFileNames: true,
-          validateEntrySizes: true,
-        })
+    zip = await openZip(source, limits)
   } catch (cause) {
+    if (cause instanceof ArchiveError) {
+      throw cause
+    }
     throw mapArchiveOpenError(source, cause)
   }
 
@@ -325,12 +447,320 @@ async function scanEntries(source: ArchiveSource, limits: ReadLimits): Promise<S
 
     return { zip, entries }
   } catch (cause) {
-    zip.close()
+    await closeZip(zip, source.kind)
     if (cause instanceof ArchiveError) {
       throw cause
     }
     throw new ArchiveError('INVALID_ARCHIVE', 'Failed while indexing ZIP entries', { cause })
   }
+}
+
+async function openZip(source: ArchiveSource, limits: ReadLimits): Promise<yauzl.ZipFile> {
+  const options = {
+    autoClose: false,
+    strictFileNames: true,
+    validateEntrySizes: true,
+  }
+  if (source.kind === 'buffer') {
+    const profile = inspectZipContainerProfile(readBufferTail(source.bytes), source.bytes.byteLength)
+    await validateCentralDirectoryProfile(
+      profile,
+      limits,
+      async (position, length) => readBufferRange(source.bytes, position, length),
+    )
+    return yauzl.fromBufferPromise(source.bytes, options)
+  }
+
+  const descriptor = await openDescriptor(source.path)
+  let transferred = false
+  try {
+    const size = await descriptorSize(descriptor)
+    const profile = inspectZipContainerProfile(
+      await readDescriptorTail(descriptor, size),
+      size,
+    )
+    await validateCentralDirectoryProfile(
+      profile,
+      limits,
+      (position, length) => readDescriptorBytes(descriptor, position, length),
+    )
+    const zip = await yauzl.fromFdPromise(descriptor, options)
+    transferred = true
+    return zip
+  } finally {
+    if (!transferred) {
+      await closeDescriptor(descriptor).catch(() => undefined)
+    }
+  }
+}
+
+function readBufferTail(bytes: Buffer): Buffer {
+  return bytes.subarray(Math.max(0, bytes.byteLength - ZIP_TRAILER_SEARCH_BYTES))
+}
+
+function readBufferRange(bytes: Buffer, position: number, length: number): Buffer {
+  if (position < 0 || length < 0 || position + length > bytes.byteLength) {
+    throw new ArchiveError('INVALID_ARCHIVE', 'ZIP central directory is outside the archive')
+  }
+  return bytes.subarray(position, position + length)
+}
+
+async function readDescriptorTail(descriptor: number, size: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new ArchiveError('INVALID_ARCHIVE', 'ZIP file has an invalid size')
+  }
+  const length = Math.min(size, ZIP_TRAILER_SEARCH_BYTES)
+  return readDescriptorBytes(descriptor, size - length, length)
+}
+
+async function readDescriptorBytes(
+  descriptor: number,
+  position: number,
+  length: number,
+): Promise<Buffer> {
+  const bytes = Buffer.alloc(length)
+  let offset = 0
+  while (offset < length) {
+    const bytesRead = await readDescriptor(
+      descriptor,
+      bytes,
+      offset,
+      length - offset,
+      position + offset,
+    )
+    if (bytesRead === 0) {
+      throw new ArchiveError('INVALID_ARCHIVE', 'ZIP file ended while reading its metadata')
+    }
+    offset += bytesRead
+  }
+  return bytes
+}
+
+function inspectZipContainerProfile(
+  trailer: Buffer,
+  totalSize: number,
+): ClassicZipContainerProfile | null {
+  const eocdOffset = findEndOfCentralDirectory(trailer)
+  if (eocdOffset === null) {
+    return null
+  }
+  if (
+    eocdOffset >= ZIP64_LOCATOR_BYTES
+    && trailer.readUInt32LE(eocdOffset - ZIP64_LOCATOR_BYTES) === ZIP64_LOCATOR_SIGNATURE
+  ) {
+    throw new ArchiveError('INVALID_ARCHIVE', 'ZIP64 archives are not allowed', {
+      details: { reason: 'zip64-archive' },
+    })
+  }
+
+  const diskNumber = trailer.readUInt16LE(eocdOffset + 4)
+  const centralDirectoryDisk = trailer.readUInt16LE(eocdOffset + 6)
+  const entriesOnDisk = trailer.readUInt16LE(eocdOffset + 8)
+  const totalEntries = trailer.readUInt16LE(eocdOffset + 10)
+  if (
+    diskNumber !== 0
+    || centralDirectoryDisk !== 0
+    || entriesOnDisk !== totalEntries
+  ) {
+    throw new ArchiveError('INVALID_ARCHIVE', 'Multi-disk ZIP archives are not allowed', {
+      details: {
+        reason: 'multi-disk-archive',
+        diskNumber,
+        centralDirectoryDisk,
+        entriesOnDisk,
+        totalEntries,
+      },
+    })
+  }
+
+  const centralDirectoryBytes = trailer.readUInt32LE(eocdOffset + 12)
+  const centralDirectoryOffset = trailer.readUInt32LE(eocdOffset + 16)
+  const eocdAbsoluteOffset = totalSize - trailer.byteLength + eocdOffset
+  if (
+    centralDirectoryOffset + centralDirectoryBytes > eocdAbsoluteOffset
+    || centralDirectoryOffset + centralDirectoryBytes > totalSize
+  ) {
+    throw new ArchiveError('INVALID_ARCHIVE', 'ZIP central directory is outside the archive')
+  }
+  return { centralDirectoryOffset, centralDirectoryBytes, totalEntries }
+}
+
+async function validateCentralDirectoryProfile(
+  profile: ClassicZipContainerProfile | null,
+  limits: ReadLimits,
+  readRange: ByteRangeReader,
+): Promise<void> {
+  if (profile === null) {
+    return
+  }
+  if (profile.totalEntries > limits.maxEntries) {
+    throw new ArchiveError(
+      'LIMIT_EXCEEDED',
+      `Archive has ${profile.totalEntries} entries; limit is ${limits.maxEntries}`,
+    )
+  }
+
+  const directoryEnd = profile.centralDirectoryOffset + profile.centralDirectoryBytes
+  let cursor = profile.centralDirectoryOffset
+  let windowStart = -1
+  let window: Buffer = Buffer.alloc(0)
+
+  for (let index = 0; index < profile.totalEntries; index += 1) {
+    if (cursor + CENTRAL_DIRECTORY_HEADER_BYTES > directoryEnd) {
+      throw new ArchiveError('INVALID_ARCHIVE', 'ZIP central directory ended early')
+    }
+    if (
+      cursor < windowStart
+      || cursor + CENTRAL_DIRECTORY_HEADER_BYTES > windowStart + window.byteLength
+    ) {
+      windowStart = cursor
+      window = await readRange(
+        windowStart,
+        Math.min(CENTRAL_DIRECTORY_READ_AHEAD_BYTES, directoryEnd - windowStart),
+      )
+    }
+    const headerOffset = cursor - windowStart
+    const header = window.subarray(
+      headerOffset,
+      headerOffset + CENTRAL_DIRECTORY_HEADER_BYTES,
+    )
+    if (
+      header.byteLength !== CENTRAL_DIRECTORY_HEADER_BYTES
+      || header.readUInt32LE(0) !== CENTRAL_DIRECTORY_HEADER_SIGNATURE
+    ) {
+      throw new ArchiveError('INVALID_ARCHIVE', 'Invalid ZIP central directory header')
+    }
+
+    const diskNumberStart = header.readUInt16LE(34)
+    if (diskNumberStart !== 0) {
+      throw new ArchiveError('INVALID_ARCHIVE', 'Multi-disk ZIP archives are not allowed', {
+        details: {
+          reason: 'multi-disk-archive',
+          entryIndex: index,
+          diskNumberStart,
+        },
+      })
+    }
+
+    const recordBytes = (
+      CENTRAL_DIRECTORY_HEADER_BYTES
+      + header.readUInt16LE(28)
+      + header.readUInt16LE(30)
+      + header.readUInt16LE(32)
+    )
+    cursor += recordBytes
+    if (cursor > directoryEnd) {
+      throw new ArchiveError('INVALID_ARCHIVE', 'ZIP central directory entry exceeds its bounds')
+    }
+  }
+}
+
+function findEndOfCentralDirectory(trailer: Buffer): number | null {
+  for (
+    let offset = trailer.byteLength - END_OF_CENTRAL_DIRECTORY_BYTES;
+    offset >= 0;
+    offset -= 1
+  ) {
+    if (trailer.readUInt32LE(offset) !== END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+      continue
+    }
+    const commentBytes = trailer.readUInt16LE(offset + 20)
+    return offset + END_OF_CENTRAL_DIRECTORY_BYTES + commentBytes === trailer.byteLength
+      ? offset
+      : null
+  }
+  return null
+}
+
+function openDescriptor(path: string): Promise<number> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    openFileDescriptor(path, 'r', (error, descriptor) => {
+      if (error) {
+        rejectPromise(error)
+        return
+      }
+      resolvePromise(descriptor)
+    })
+  })
+}
+
+function descriptorSize(descriptor: number): Promise<number> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    statFileDescriptor(descriptor, (error, stats) => {
+      if (error) {
+        rejectPromise(error)
+        return
+      }
+      resolvePromise(stats.size)
+    })
+  })
+}
+
+function readDescriptor(
+  descriptor: number,
+  buffer: Buffer,
+  offset: number,
+  length: number,
+  position: number,
+): Promise<number> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    readFileDescriptor(
+      descriptor,
+      buffer,
+      offset,
+      length,
+      position,
+      (error, bytesRead) => {
+        if (error) {
+          rejectPromise(error)
+          return
+        }
+        resolvePromise(bytesRead)
+      },
+    )
+  })
+}
+
+function closeDescriptor(descriptor: number): Promise<void> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    closeFileDescriptor(descriptor, (error) => {
+      if (error) {
+        rejectPromise(error)
+        return
+      }
+      resolvePromise()
+    })
+  })
+}
+
+async function closeZip(zip: yauzl.ZipFile, sourceKind: ArchiveSource['kind']): Promise<void> {
+  if (!zip.isOpen) {
+    return
+  }
+  if (sourceKind === 'buffer') {
+    zip.close()
+    return
+  }
+
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const onClose = (): void => {
+      zip.off('error', onError)
+      resolvePromise()
+    }
+    const onError = (cause: unknown): void => {
+      zip.off('close', onClose)
+      rejectPromise(cause)
+    }
+    zip.once('close', onClose)
+    zip.once('error', onError)
+    try {
+      zip.close()
+    } catch (cause) {
+      zip.off('close', onClose)
+      zip.off('error', onError)
+      rejectPromise(cause)
+    }
+  })
 }
 
 function mapArchiveOpenError(source: ArchiveSource, cause: unknown): ArchiveError {
@@ -601,21 +1031,25 @@ async function readMarkdownEntry(
   maxBytes: number,
 ): Promise<Uint8Array> {
   const bytes = await readEntryBytes(scanned.zip, entry, maxBytes)
+  validateMarkdownBytes(bytes, entry.fileName)
+  return bytes
+}
+
+export function validateMarkdownBytes(bytes: Uint8Array, entryName: string): void {
   let text: string
   try {
     text = UTF8_DECODER.decode(bytes)
   } catch (cause) {
-    throw new ArchiveError('INVALID_UTF8', `Entry ${entry.fileName} is not valid UTF-8`, {
-      entry: entry.fileName,
+    throw new ArchiveError('INVALID_UTF8', `Entry ${entryName} is not valid UTF-8`, {
+      entry: entryName,
       cause,
     })
   }
   if (text.charCodeAt(0) === 0xfeff) {
-    throw new ArchiveError('INVALID_UTF8', `Entry ${entry.fileName} must not contain a UTF-8 BOM`, {
-      entry: entry.fileName,
+    throw new ArchiveError('INVALID_UTF8', `Entry ${entryName} must not contain a UTF-8 BOM`, {
+      entry: entryName,
     })
   }
-  return bytes
 }
 
 async function readEntryBytes(

@@ -1,15 +1,19 @@
 # MDV 开放问题
 
-以下问题尚未冻结。它们不属于当前 public API 承诺。
+这里记录尚未冻结的问题，以及已经给出阶段性结论的边界。标记为 Open/Deferred 的内容不属于当前 public API 承诺。
 
 ## O001：M3 原子替换的跨平台细节
 
-- 状态：Open
+- 状态：Resolved for M3（带平台限定）
 - 所属阶段：M3
 - Owner：Core maintainer
-- 问题：macOS、Linux 和 Windows 上锁文件、fsync、目录同步及 replace 失败恢复的精确实现和错误映射。
-- 已确认边界：锁内重读 generation；同目录临时文件；完整 Reader 校验后再替换；任一失败不得破坏旧包。
-- 下一检查：实现 Writer 前先建立故障注入测试矩阵。
+- 结论：按文件系统最终路径加锁；锁内重读并比较 documentId + generation；同目录写私有临时文件；完整 Reader 校验并 fsync 后，以原子 replace 作为 commit point；replace 后同步目录元数据，并在锁内打开结果。
+- 失败语义：commit point 前失败时旧文件必须 byte-for-byte 不变；commit point 后目录同步失败时返回 `IO_ERROR`，details 包含 `stage: 'sync-directory'`、`committed: true` 和新 generation，调用方重新打开目标确认结果。
+- 文件边界：写事务拒绝最终 symlink、hard-link alias 和其他非普通文件；一致性保证限于实现支持、能提供可靠目录锁、同目录原子替换与 fsync 语义的本地文件系统。网络文件系统、FUSE 和同步盘不作同等级承诺。
+- 恢复边界：锁永不按时间自动回收。异常退出后，只有在确认没有活跃 writer 时才人工删除 `<target>.lock` 与遗留的 `.mdv-*.tmp`；清理失败由结构化错误显式上报。
+- 元数据边界：save 保留 POSIX mode，不承诺 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。
+- 平台结论：macOS 本地文件系统已实测文件与目录同步；Windows 会刷新临时文件，但目录项 crash durability 弱于 POSIX，且尚未通过 Windows CI。因此 M3 不宣称两者具有同等级的断电持久性。
+- 验证：61 项测试在 Node 20.19.5 实跑通过，覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、写 ZIP、临时包全验、fsync、replace、目录同步故障注入、真实跨进程竞争、路径身份、清理失败与权限边界；独立 tarball consumer smoke 验证 package-root 安装和 create/save/open。
 
 ## O002：受管资源的媒体类型与扩展名策略
 

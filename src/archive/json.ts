@@ -38,8 +38,77 @@ export function parseJsonEntry(
   }
 }
 
+export function replaceTopLevelJsonSafeInteger(
+  bytes: Uint8Array,
+  entry: string,
+  member: string,
+  value: number,
+  maxDepth: number,
+): Uint8Array {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${member} must be a non-negative safe integer`)
+  }
+
+  let text: string
+  try {
+    text = UTF8_DECODER.decode(bytes)
+  } catch (cause) {
+    throw new ArchiveError('INVALID_UTF8', `Entry ${entry} is not valid UTF-8`, { entry, cause })
+  }
+  if (text.charCodeAt(0) === 0xfeff) {
+    throw new ArchiveError('INVALID_MANIFEST', `Entry ${entry} must not contain a UTF-8 BOM`, {
+      entry,
+    })
+  }
+
+  const scanner = new JsonSyntaxScanner(text, maxDepth)
+  try {
+    scanner.scan()
+  } catch (cause) {
+    if (cause instanceof ArchiveError) {
+      throw cause
+    }
+    const message = cause instanceof Error ? cause.message : String(cause)
+    throw new ArchiveError('INVALID_MANIFEST', `Entry ${entry} is not valid JSON: ${message}`, {
+      entry,
+      cause,
+    })
+  }
+  const range = scanner.getTopLevelMember(member)
+  if (range === undefined) {
+    throw new ArchiveError(
+      'INVALID_MANIFEST',
+      `Entry ${entry} must contain a top-level safe integer member ${member}`,
+      { entry },
+    )
+  }
+  const currentValue = JSON.parse(text.slice(range.start, range.end)) as unknown
+  if (
+    typeof currentValue !== 'number'
+    || !Number.isSafeInteger(currentValue)
+    || currentValue < 0
+  ) {
+    throw new ArchiveError(
+      'INVALID_MANIFEST',
+      `Entry ${entry} must contain a top-level safe integer member ${member}`,
+      { entry },
+    )
+  }
+
+  return Buffer.from(
+    `${text.slice(0, range.start)}${value}${text.slice(range.end)}`,
+    'utf8',
+  )
+}
+
+interface JsonValueRange {
+  readonly start: number
+  readonly end: number
+}
+
 class JsonSyntaxScanner {
   private offset = 0
+  private readonly topLevelMembers = new Map<string, JsonValueRange>()
 
   constructor(
     private readonly text: string,
@@ -53,6 +122,10 @@ class JsonSyntaxScanner {
     if (this.offset !== this.text.length) {
       this.fail('unexpected content after the root value')
     }
+  }
+
+  getTopLevelMember(name: string): JsonValueRange | undefined {
+    return this.topLevelMembers.get(name)
   }
 
   private parseValue(depth: number): void {
@@ -102,7 +175,11 @@ class JsonSyntaxScanner {
         this.fail('expected a colon after an object member name')
       }
       this.skipWhitespace()
+      const valueStart = this.offset
       this.parseValue(depth)
+      if (depth === 1) {
+        this.topLevelMembers.set(key, { start: valueStart, end: this.offset })
+      }
       this.skipWhitespace()
       if (this.consume('}')) {
         return

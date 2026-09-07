@@ -7,6 +7,8 @@
 > 不在范围：VS Code / MarkText 的具体 UI，以及 Markdown 解析与渲染实现
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
+>
+> 实现进度：M3 的 create、read、trace 与 working-copy save 已完成；commit/checkout 从 M4 开始。
 
 ## 1. 背景与目标
 
@@ -371,9 +373,13 @@ export function createMdv(
   path: string,
   options?: CreateOptions,
 ): Promise<MdvDocument>
+
+interface CreateOptions extends OpenOptions {
+  readonly markdownProfile?: string
+}
 ```
 
-`createMdv` 创建 generation 为 0 的空容器；目标路径已存在时失败，不能覆盖。
+`createMdv` 创建 generation 为 0 的空容器；目标路径已存在时以 `CONFLICT` 失败，不能覆盖。创建成功后返回路径绑定的 `MdvDocument`，可以直接读取或保存。
 
 ### 6.1 只读能力
 
@@ -460,25 +466,24 @@ Core 的 public model 不兼容也不复用 Muya State、remark AST 或其他 Ma
 ### 6.3 保存工作副本
 
 ```ts
-interface SaveReferenceInput {
-  markdown: string | Uint8Array
-  expectedGeneration: number
-}
-
-interface SaveDocumentInput {
-  markdown: string | Uint8Array
-  expectedGeneration: number
+interface SaveInput {
+  readonly markdown: string | Uint8Array
+  readonly expectedGeneration: number
 }
 
 interface MdvDocument extends DocumentSnapshot {
-  saveReference(input: SaveReferenceInput): Promise<WriteResult>
-  saveDocument(input: SaveDocumentInput): Promise<WriteResult>
+  saveReference(input: SaveInput): Promise<MdvDocument>
+  saveDocument(input: SaveInput): Promise<MdvDocument>
 }
 ```
 
 - `saveReference` 只更新 `ref_tree/current.md`。
 - `saveDocument` 只更新 `doc_tree/current.md`。
-- 两种 save 都递增 generation，但都不创建 Version。
+- 两种 save 都把 generation 精确增加 1，但都不创建 Version。
+- 成功结果本身就是重新绑定目标文件的新 `MdvDocument`；新的 generation 位于 `result.manifest.generation`，不再套一层只重复 generation 和 snapshot 的结果对象。
+- 原 `MdvDocument` 仍是打开时刻的不可变快照。调用方必须接住成功返回的新对象，后续写入使用它的 generation。
+- `string` 按 UTF-8 写入；`Uint8Array` 是 byte-for-byte 保真的基础输入。写入值仍须满足 Format 0.1 的严格 UTF-8、无 BOM 约束。
+- `expectedGeneration` 必须是非负安全整数，并在取得文件锁、重开最新包之后比较；不匹配时返回 `CONFLICT`，不产生临时提交。
 
 ### 6.4 Commit
 
@@ -525,8 +530,8 @@ interface CheckoutInput {
 }
 
 interface MdvDocument {
-  checkoutReference(input: CheckoutInput): Promise<WriteResult>
-  checkoutDocument(input: CheckoutInput): Promise<WriteResult>
+  checkoutReference(input: CheckoutInput): Promise<MdvDocument>
+  checkoutDocument(input: CheckoutInput): Promise<MdvDocument>
 }
 ```
 
@@ -561,21 +566,31 @@ interface MdvDocument {
 save、commit 和 checkout 都是完整文档写事务：
 
 ```text
-获取跨进程独占锁
+按文件系统最终路径获取跨进程独占锁
 -> 重新打开磁盘上的最新包
--> 检查 expectedGeneration
+-> 检查 documentId 与 expectedGeneration
 -> 校验本次操作的目标版本与类型
 -> 更新工作副本，或增加不可变版本并更新 Head
--> 在同目录临时文件中写出完整新 ZIP
+-> 在同目录的私有临时文件中写出完整新 ZIP
 -> 对临时包执行结构与完整性校验
--> fsync 临时文件和必要的目录元数据
--> 原子替换原 .mdv
+-> fsync 临时文件
+-> 原子替换原 .mdv（事务 commit point）
+-> 同步目录元数据
+-> 在锁内打开结果
 -> 释放锁并返回新 snapshot
 ```
 
-generation 不匹配时返回 `CONFLICT` 和实际 generation，不自动重试或覆盖。调用方应重新打开文档，比较工作副本变化，再决定如何合并。
+M3 已为 `createMdv`、`saveReference` 和 `saveDocument` 落地这套事务。commit 与 checkout 尚未实现，但必须复用同一路径，不能建立第二套 Writer。generation 或 document identity 不匹配时返回 `CONFLICT`，不自动重试或覆盖。调用方应重新打开文档，比较工作副本变化，再决定如何合并。
 
-0.1 接受整包重写成本。实现可以直接复制未变化的 ZIP 条目，避免无意义地解压/重压历史正文，但不能就地改写旧包。大文档的内容去重、分块和增量容器属于后续格式版本。
+原子替换成功是事务的 commit point。它之前的写 ZIP、校验或 fsync 失败都必须保持旧包 byte-for-byte 不变；它之后若目录同步失败，新 generation 可能已经提交，错误 details 必须包含 `stage: 'sync-directory'`、`committed: true` 和已写入的 generation。此时调用方不能用旧快照盲目重试，而应重新 `openMdv` 确认磁盘状态。
+
+0.1 的写入保证限定在 Core 明确支持的本地文件系统上：目标必须是只有一个文件名链接的普通文件，且文件系统必须提供可靠的目录创建、同目录原子替换与 fsync 语义。写入入口拒绝最终 symlink、hard-link alias 及其他非普通文件；网络文件系统、FUSE 或同步盘若不能提供这些语义，不在相同保证范围内。只读入口仍按 Reader 的既有安全规则处理输入。
+
+锁是规范目标路径旁的 `<target>.lock` 目录。M3 有意不按年龄自动回收已有锁：进程遭遇 `SIGKILL`、机器崩溃或清理失败后，只有确认没有活跃 writer 时才可人工删除锁目录和同目录遗留的 `.mdv-*.tmp`。常规失败会尽力清理；如果清理本身失败，错误 details 明确携带 `cleanupIncomplete` 与 `cleanupFailures`。
+
+临时包从创建起限制为 POSIX mode `0600`；save 只保留原目标的 POSIX mode，不承诺保留 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。macOS/Linux 路径会同步临时文件和父目录；Windows 会刷新临时文件，但由于 Node 没有可移植的目录 fsync/write-through 接口，断电后的目录项持久性弱于 POSIX，且当前尚未经过 Windows CI 实测。
+
+0.1 接受整包重写成本。M3 Writer 使用 STORE 与固定 ZIP metadata 生成确定性 ZIP32；manifest 只原位替换 generation token，历史 version metadata 原始字节透传，历史正文以单次 ZIP 扫描逐版本校验并送入 Writer，避免把全部历史正文同时驻留内存。Writer 不能就地改写旧包。大文档的内容去重、分块和增量容器属于后续格式版本。
 
 ## 8. Agent 工作流
 
@@ -584,7 +599,7 @@ Agent 一次成品编辑任务的标准流程：
 1. 打开 `.mdv`，读取 status、`ref_tree/HEAD` 和 `doc_tree/HEAD`。
 2. 如果任务依赖摘要，选择一个已经 commit 的 Reference Version 并固定其精确 ID；否则固定为 `null`。
 3. 按需读取选中的 Reference Version、当前成品和少量相关历史，不加载全部正文；选择 `null` 时跳过 Reference 正文。
-4. 调用 `saveDocument({ markdown })` 保存草稿；可以重复多次，不产生版本。
+4. 调用 `saveDocument({ markdown, expectedGeneration })` 保存草稿，并用返回的新 `MdvDocument` 继续操作；可以重复多次，不产生版本。
 5. 用户或 Agent 明确决定保留版本时，调用 `commitDocument({ referenceVersion, actor, summary })`。
 6. 新 Document Version 把这次 commit 传入的 ID 或 `null` 写入自己的 `meta.json.referenceVersion`，因此后续可以确定它基于哪个摘要版本，或确定它没有摘要依赖。
 
@@ -802,12 +817,13 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 
 1. 评审并冻结 ZIP、最小 manifest、`ref_tree` / `doc_tree`、nullable Document Version bind、Version ID 和附件边界。
 2. 写 `spec/format-0.1.md`、三个 JSON Schema 和第一批合法/非法 fixtures。
-3. 实现只读 Core：`parse/open`、工作副本读取、版本索引、trace、`readVersion`、`verify`、`exportMarkdown`。
-4. 实现工作副本 Writer：`saveReference`、`saveDocument`、generation CAS 和原子替换。
-5. 实现 `commitReference`、`commitDocument` 和 checkout。
-6. 实现 Diff 和 Reference 漂移。
-7. 实现内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
-8. 用真实复杂 Markdown 和资源 sidecar 验证 Core 闭环，再启动独立 VS Code extension；MarkText adapter 后续接入。
+3. 实现 M1 内部 Reader、版本图校验与查询。
+4. 实现 M2 公开只读 API：`parse/open`、工作副本读取、版本索引、trace 与 `readVersionBytes/Text`。
+5. 实现 M3 工作副本 Writer：`createMdv`、`saveReference`、`saveDocument`、generation CAS 和原子替换。
+6. 实现 M4 `commitReference`、`commitDocument` 和 checkout。
+7. 实现 M5 Diff、Reference 漂移、`verify` 与 `exportMarkdown`。
+8. 实现内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
+9. 用真实复杂 Markdown 和资源 sidecar 完成 M6 发布收口，再启动独立 VS Code extension；MarkText adapter 后续接入。
 
 第一步不是在任何编辑器的扩展名白名单中加入 `.mdv`。只有格式、fixtures 和 Core 先形成独立边界，MDV 才不会变成只能由单一编辑器理解的私有文件。
 

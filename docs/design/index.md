@@ -8,7 +8,7 @@
 
 ## 当前综合结论
 
-MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 当前完成 M2 只读链路，下一阶段是带 generation CAS 的创建、保存和原子文件事务。
+MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 已完成 M3 创建、读取、工作副本保存和 POSIX 本地原子文件事务；下一阶段是 M4 commit/checkout。
 
 ## 页面
 

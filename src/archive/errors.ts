@@ -9,6 +9,7 @@ export type ArchiveErrorCode =
   | 'INTEGRITY_MISMATCH'
   | 'NOT_FOUND'
   | 'LIMIT_EXCEEDED'
+  | 'CONFLICT'
   | 'IO_ERROR'
 
 export type ArchiveErrorDetails = Readonly<Record<string, unknown>>

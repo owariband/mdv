@@ -6,7 +6,7 @@
 
 MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@mdv/core` 是它的 TypeScript 参考实现。
 
-> 当前状态：开发预览。M2 只读 API 已完成；创建、保存、commit、checkout 和正式 npm 发布尚未完成。
+> 当前状态：开发预览。M3 创建、读取与工作副本保存 API 已完成；commit、checkout 和正式 npm 发布尚未完成。
 
 ## 为什么使用 MDV
 
@@ -19,18 +19,24 @@ MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副
 ## 当前可用能力
 
 ```ts
-import { openMdv } from '@mdv/core'
+import { createMdv, openMdv } from '@mdv/core'
 
-const document = await openMdv('/documents/example.mdv')
-const markdown = await document.readDocumentText()
+let document = await createMdv('/documents/example.mdv')
+document = await document.saveDocument({
+  markdown: '# Hello MDV\n',
+  expectedGeneration: document.manifest.generation,
+})
 
-if (document.documentTree.head !== null) {
-  const trace = document.traceDocument(document.documentTree.head)
+const reopened = await openMdv('/documents/example.mdv')
+console.log(await reopened.readDocumentText())
+
+if (reopened.documentTree.head !== null) {
+  const trace = reopened.traceDocument(reopened.documentTree.head)
   console.log(trace.reference)
 }
 ```
 
-M2 已支持从文件或内存打开 MDV、读取两份工作副本和历史正文、查询两棵版本树、追踪 bind，并返回稳定的错误码。当前 API 是只读的，不能保存修改。
+M3 已支持创建空 MDV、从文件或内存打开、保存两份工作副本、读取历史正文、查询两棵版本树并追踪 bind。普通 save 只更新工作副本并递增 generation，不创建 Version；显式 commit 仍属于下一阶段。
 
 ## 从源码使用
 
@@ -44,11 +50,13 @@ npm test
 npm run build
 ```
 
-随后在调用方项目中安装已经构建的目录：
+随后在调用方项目中安装本地目录：
 
 ```bash
 npm install /absolute/path/to/mdv
 ```
+
+仓库的 `prepare` 生命周期会生成 `dist/`，因此干净 checkout、本地目录、Git dependency 和 `npm pack` 不依赖预先提交构建产物。
 
 运行时要求 Node.js 20 或更高版本，并使用 ESM `import`。
 
@@ -57,7 +65,7 @@ npm install /absolute/path/to/mdv
 - [官方使用文档](docs/README.md)
 - [快速开始](docs/getting-started.md)
 - [核心概念](docs/concepts.md)
-- [M2 API 参考](docs/api-reference.md)
+- [M3 API 参考](docs/api-reference.md)
 - [图片与相对资源](docs/resources.md)
 - [MDV Container Format 0.1](spec/format-0.1.md)
 - [维护者设计资料](docs/design/index.md)

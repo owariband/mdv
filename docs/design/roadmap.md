@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-07
 >
-> 当前里程碑：M2「公开只读 API」已完成，下一步进入 M3「创建、保存与文件事务」
+> 当前里程碑：M3「创建、保存与文件事务」已完成；下一步为 M4「Commit 与 Checkout」
 >
 > 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件
 >
@@ -39,10 +39,10 @@
 | M0 格式与工程基线 | 完成 | Format 0.1、Schema、基础 fixtures、单包工程 | 后续仍需扩充一致性 fixtures |
 | M1 内部只读基础 | 完成 | ZIP Reader、严格 JSON/UTF-8、hydrate、版本图校验和基础索引查询 | 后续在 M6 扩充安全与 fuzz 矩阵 |
 | M2 公开只读 API | 完成 | package root 的 open/parse、只读 facade、查询、trace、bytes/text 和稳定错误映射 | 写能力留在 M3，状态与完整性能力留在 M5 |
-| M3 创建、保存与文件事务 | 未开始 | 事务语义已有设计 | ZIP Writer、锁、CAS、临时包校验和原子替换尚未实现 |
+| M3 创建、保存与文件事务 | 完成 | create/save、确定性 ZIP Writer、锁内双重 CAS、临时包全验、fsync 与原子替换 | Windows 目录项 crash durability 尚未达到 POSIX 同等级保证 |
 | M4 Commit 与 Checkout | 未开始 | commit/bind/branch 规则已有设计 | Core commands 和持久化 mutation 尚未实现 |
 | M5 Review 与完整性能力 | 未开始 | Diff、drift、verify、export 契约已有设计 | 实现与覆盖测试尚未开始 |
-| M6 稳定发布 | 未开始 | 当前包可本地 build，调用方文档已建立 | 安装产物、完整 fixtures、CI、发布与兼容性验证未完成 |
+| M6 稳定发布 | 未开始 | `prepare`、tarball consumer smoke 与调用方文档已建立 | 完整 fixtures、CI matrix、正式发布与兼容性承诺未完成 |
 | U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端，使用 Core 返回的 Markdown 与资源基准 | 按当前策略等待 Core 0.1 闭环完成后启动 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
 | U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游 | 等待 public write API 稳定 |
@@ -178,7 +178,7 @@ M1 明确不包含：
 
 ### M3：创建、保存与原子文件事务
 
-状态：**未开始**
+状态：**完成**
 
 目标：形成第一个安全写入闭环。普通保存只修改工作副本，不创建历史版本。
 
@@ -186,11 +186,13 @@ M1 明确不包含：
 
 Archive Writer：
 
-- 编码 manifest、HEAD 和 version meta；
+- 编码新建 manifest 与工作副本；save 只更新 generation 和目标工作副本，原样保留 HEAD 与 version metadata；
 - 生成符合 Format 0.1 的 ZIP32 单文件；
 - 保留被重写 JSON 对象中的未知字段和值；
 - 复制未变化的历史条目，不修改任何已有 version 内容；
 - 提供有限的 package mutation，不允许上层任意编辑 ZIP entry。
+
+新增 version metadata 与 HEAD 的编码由真正创建版本的 M4 commit 实现，M3 不为尚不存在的命令提前保留一套未验证 encoder。
 
 本地文件事务：
 
@@ -199,15 +201,15 @@ Archive Writer：
 - 比较 `expectedGeneration`，不一致返回 `CONFLICT`；
 - 在目标同目录写唯一临时包；
 - 使用现有 Reader 对临时包重新执行结构和新增正文完整性校验；
-- fsync 临时文件，原子替换目标文件，并同步必要的目录元数据；
-- 所有失败路径保留原文件可读，并清理本次创建的临时文件和锁。
+- fsync 临时文件，以原子替换作为 commit point，再同步必要的目录元数据；
+- commit point 前的失败保留旧文件 byte-for-byte 不变；所有失败路径都保持目标为可读的旧包或新包，并尽力清理本次创建的临时文件和锁，清理失败必须显式上报。
 
 Public API：
 
 - 实现 `createMdv(path)`；
 - 实现 `saveReference({ markdown, expectedGeneration })`；
 - 实现 `saveDocument({ markdown, expectedGeneration })`；
-- 两种 save 成功后 generation 精确增加 1，并返回新的只读 snapshot；
+- 两种 save 成功后 generation 精确增加 1，并直接返回新的路径绑定 `MdvDocument`；调用方从 `result.manifest.generation` 取得新 generation；
 - 目标已存在时 `createMdv` 失败，不默认覆盖。
 
 验收条件：
@@ -218,9 +220,25 @@ Public API：
 - Markdown 字节，包括 CRLF、中文和末尾换行，写入再读取后 byte-for-byte 一致；
 - 两个 writer 使用同一 generation 时最多一个成功，另一个稳定返回 `CONFLICT`；
 - 在写 ZIP、临时包校验、fsync、replace 等阶段注入失败后，原包仍可正常打开；
+- 原子 replace 是 commit point；如果 replace 已成功而目录同步失败，错误明确携带 `committed: true` 和新 generation，调用方可以重新打开确认状态；
+- save 拒绝最终 symlink、hard-link alias 和其他非普通文件目标；事务保证限定在支持跨进程锁与同目录原子替换的本地文件系统；
 - 任意宿主 adapter 都通过 `saveDocument` 保存工作副本，而不是把 Markdown 文本直接覆盖到 `.mdv` ZIP 上。
 
 这是 0.1 实现中风险最高的阶段。锁、CAS、临时文件、校验和 replace 必须作为一个事务闭环实现，不能先提供一个会直接覆盖原包的“简化 Writer”。
+
+实际交付在原计划基础上进一步收紧了以下边界：
+
+- save 在锁内同时比较 `documentId` 与 generation，避免路径被另一个同 generation 文档复用后误写；路径绑定还保存打开时的文件系统最终路径，并在父目录 alias 改变时拒绝写入；
+- save 拒绝最终 symlink、hard-link aliases 和非普通文件；已有 POSIX mode 会保留，所有临时包从 `0600` 开始，避免重写窗口泄露私有正文；
+- Writer 以 UTF-8 entry name byte order、固定 DOS 时间与 STORE 模式生成确定性 ZIP32；历史正文通过一次 ZIP 扫描逐版本送给 Writer，内存不随全部历史正文线性驻留；
+- manifest 只替换原始 JSON 中的 generation token，版本 metadata 原样复制，因此未知字段中的超大数值、空白和 key 顺序不会经过有损 `JSON.parse -> stringify` 回写；
+- 原子 replace 前重新用完整 Reader 校验临时包；源历史和临时历史都逐条验证 UTF-8、长度与 SHA-256；
+- 事务成功直接返回锁内读取的新 `MdvDocument`，避免解锁后二次 open 读到另一个 writer 的 generation；
+- 锁采用规范目标旁的目录互斥。已有锁不按时间自动回收；异常退出后只有在确认无 writer 存活时才人工删除。清理失败通过 `cleanupIncomplete` 与 `cleanupFailures` 显式上报；
+- POSIX 本地文件系统路径会刷新临时文件、发布目录项以及锁删除后的目录元数据。Windows 会刷新临时文件，但 Node 缺少可移植目录 fsync/write-through，当前只承诺较弱的原子可见性，尚未完成 Windows CI 验证；
+- 提前加入 `prepare` 构建生命周期和独立 tarball consumer smoke，避免干净 checkout 打出的包缺少 `dist/`。
+
+截至 2026-09-07，`npm test` 的 61 项测试在 Node 20.19.5 与当前开发环境 Node 26.3.0 全部通过。覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、真实跨进程 create/save 竞争、generation/document/path 身份冲突、symlink/hardlink 防护、故障注入、commit point 之后的错误语义、清理失败报告、只读权限保持、临时文件及极端 umask 权限、历史完整性、未知 JSON 原样保留、动态时区下确定性以及 package-root 写 API。
 
 ### M4：Commit 与 Checkout
 
@@ -293,8 +311,8 @@ Public API：
 - 增加 `create -> save -> commit -> reopen -> trace -> verify -> export` 端到端测试；
 - 对真实历史规模做打开、按需读、整包重写的基准测试；
 - 随 API 演进维护现有 README、快速开始和 API 参考，并补齐最终发布示例；
-- 增加适合 npm tarball 与 Git dependency 的构建生命周期；
-- 在临时目录安装打包产物，验证 runtime import、类型声明和依赖完整；
+- 维护已经建立的 npm tarball/Git dependency `prepare` 构建生命周期；
+- 把已经通过的临时目录 tarball consumer smoke 固化进 CI matrix，持续验证 runtime import、类型声明和依赖完整；
 - 决定最终 npm 包名、scope 发布权限、License 和 0.1 版本策略；
 - 建立 CI，在支持的 Node.js 版本上执行 build、test 和 package smoke test。
 
@@ -342,15 +360,15 @@ CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
 
 ## 6. 下一批开发任务
 
-下一批只做 M3，不同时启动 VS Code、MarkText 或 CLI：
+下一批进入 M4，不同时启动 VS Code、MarkText 或 CLI：
 
-1. 定义最小 package mutation，禁止 public 层任意编辑 ZIP entry；
-2. 实现确定性 ZIP Writer，保留未知 JSON 字段并复制未变化历史；
-3. 实现 `createMdv(path)`，目标存在时拒绝覆盖；
-4. 实现跨进程锁、generation CAS、同目录临时包、完整校验、fsync 和原子替换；
-5. 实现 `saveReference`、`saveDocument`，保存只更新工作副本并递增 generation，不创建版本；
-6. 增加失败注入、并发冲突、byte-for-byte round-trip 和 package-root 写 API 测试；
-7. M3 主事务闭环稳定后，再加入 Core 管理的内容寻址外部资源读写；
+1. 定义最小 Core commit/checkout commands 和 archive mutation，不开放任意 ZIP entry 编辑；
+2. 实现 Reference 与 Document 的不可变 Version 创建、parent 与 Head 更新；
+3. 让 `commitDocument` 显式接收一个已存在的 Reference Version 或 `null`，不隐式绑定当前 Reference Head；
+4. 实现 no-changes、仅 bind 改变、从旧 Head 分叉等语义；
+5. 实现 checkout 只恢复工作副本并移动对应 Head、不创建 Version；
+6. 复用 M3 的 documentId/generation CAS、临时包全验和原子事务，不建立第二套写路径；
+7. 补齐 commit/checkout 的 package-root API、fixtures、并发与重开 trace 测试；
 8. 继续只发布一个 `@mdv/core`，不增加 Repository、Provider、Factory 或第二存储后端。
 
 ## 7. 暂不进入 0.1 的工作

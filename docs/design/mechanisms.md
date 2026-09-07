@@ -444,11 +444,15 @@ export function createMdv(
   path: string,
   options?: CreateOptions,
 ): Promise<MdvDocument>
+
+interface CreateOptions extends OpenOptions {
+  readonly markdownProfile?: string
+}
 ```
 
 - `parseMdv` 是只读内存入口；除非调用方在 options 中提供资源基准，否则 `baseDirectory = null`。
 - `openMdv` 保存规范化后的 `.mdv` 包路径和所在目录，但不会伪造内部 Markdown path。
-- `createMdv` 在目标不存在时创建 generation 0、两个空工作副本、零版本、零 Head 的包。
+- `createMdv` 在目标不存在时创建 generation 0、两个空工作副本、零版本、零 Head 的包；目标已存在时返回 `CONFLICT`，不覆盖也不跟随 symlink。
 
 ### 6.2 查询
 
@@ -503,12 +507,12 @@ interface DocumentSnapshot {
 
 ```ts
 interface MdvDocument extends DocumentSnapshot {
-  saveReference(input: SaveInput): Promise<WriteResult>
-  saveDocument(input: SaveInput): Promise<WriteResult>
+  saveReference(input: SaveInput): Promise<MdvDocument>
+  saveDocument(input: SaveInput): Promise<MdvDocument>
   commitReference(input: CommitInput): Promise<CommitResult>
   commitDocument(input: CommitDocumentInput): Promise<CommitResult>
-  checkoutReference(input: CheckoutInput): Promise<WriteResult>
-  checkoutDocument(input: CheckoutInput): Promise<WriteResult>
+  checkoutReference(input: CheckoutInput): Promise<MdvDocument>
+  checkoutDocument(input: CheckoutInput): Promise<MdvDocument>
 }
 
 interface SaveInput {
@@ -523,7 +527,9 @@ interface CommitDocumentInput extends CommitInput {
 
 `referenceVersion` 必须显式传值。`null` 表示无摘要依赖，不能把“未传”偷偷解释成当前 `ref_tree/HEAD`，否则并发更新摘要时会生成调用方没有明确选择的 bind。
 
-所有成功写操作返回新的 generation 和只读 snapshot；调用方后续写入必须使用新 generation。
+save 和 checkout 成功后直接返回新的路径绑定 `MdvDocument`，新的 generation 位于 `result.manifest.generation`；不增加只把 generation 与 snapshot 再包装一次的结果对象。调用方后续写入必须使用返回对象，而不能继续沿用旧快照。commit 是否需要额外返回新建 Version ID 和 `created` 状态，由 M4 的 `CommitResult` 单独表达。
+
+`expectedGeneration` 是非负安全整数。public facade 先拒绝无效参数，但真实的 CAS 比较必须在 archive 取得锁并重开最新包之后执行；不匹配时返回 `CONFLICT`，不能先写临时提交再判断。
 
 ## 7. Core 处理流程
 
@@ -570,7 +576,9 @@ public API command
 -> core hydrate 最新状态并执行语义命令
 -> core 返回 package mutation
 -> archive 写临时包并完整校验
--> fsync + atomic replace
+-> fsync 临时文件
+-> atomic replace（commit point）
+-> 同步目录元数据
 -> 返回新 snapshot
 ```
 
@@ -603,19 +611,29 @@ Reader 在读取正文前已经拒绝绝对路径、`..`、反斜杠、重复/�
 
 ### 8.2 Writer 与事务
 
-每次 save、commit 和 checkout 都整包事务写入：
+M3 已为 create 和两种 working-copy save 实现整包事务；M4 的 commit/checkout 必须复用该事务边界：
 
-1. 获取与目标 `.mdv` 对应的跨进程独占锁；
+1. 解析文件系统最终路径，并获取相邻 `<target>.lock` 目录锁；
 2. 在锁内重新打开原包；
-3. 比较 `expectedGeneration`，不一致立即返回 `CONFLICT`；
+3. 同时比较打开快照的 `documentId` 与 `expectedGeneration`，不一致立即返回 `CONFLICT`；
 4. 由 Core 在最新状态上计算修改；
-5. 在同目录创建唯一临时文件；
-6. 复制未变化条目，写入变化条目和 `generation + 1` 的 manifest；
-7. 对临时包重新执行结构校验，必要时执行新增正文全量验哈希；
-8. fsync 临时文件，原子替换目标，并同步目录元数据；
-9. 释放锁并返回新 snapshot。
+5. 在同目录以不宽于 POSIX mode `0600` 创建唯一临时文件；
+6. 逐版本复制并校验未变化历史，写入变化条目，并只替换 manifest 的 generation token；
+7. 用完整 Reader 重新校验临时包及全部历史正文；
+8. fsync 临时文件；
+9. 原子替换目标；这一步成功即越过事务 commit point；
+10. 同步目录元数据，在锁内打开并验证结果；
+11. 释放锁，再同步锁删除所在目录并返回新 snapshot。
 
-Writer 不就地修改 ZIP，不覆盖历史版本条目，也不在失败后留下半个有效目标文件。目标路径已存在时 `createMdv` 失败，不默认覆盖。
+Writer 使用稳定的 UTF-8 entry-name byte order、STORE、固定 DOS 时间和 ZIP32，不就地修改 ZIP，也不覆盖历史版本条目。历史 version metadata 按原始 bytes 透传；manifest 未知字段、未知大整数、空白和 key 顺序不会因 save 经过有损的整体 JSON 重编码。目标路径已存在时 `createMdv` 失败，不默认覆盖。
+
+commit point 之前的错误必须保持旧目标 byte-for-byte 不变，并尽力清理本次临时文件和锁。清理自身失败时通过 `cleanupIncomplete` 与 `cleanupFailures` 上报。commit point 之后如果目录同步失败，目标可能已经是新 generation；公开 `IO_ERROR.details` 必须包含 `stage: 'sync-directory'`、`committed: true` 和 generation，调用方随后重新 `openMdv` 判断结果，不能用旧 generation 自动重试。
+
+文件事务只对实现明确支持的本地文件系统承诺跨进程互斥、CAS 和同目录原子替换。save 拒绝最终 symlink、hard-link alias 和其他非普通文件目标；网络文件系统、FUSE、同步盘或破坏锁/原子替换语义的挂载不在同等级保证范围内。`createMdv` 同样不会跟随一个已存在的 symlink 并覆盖其指向目标。
+
+已有锁永不按时间自动回收，以免把缓慢但仍活跃的 writer 误判为 stale。进程崩溃后，维护者必须先确认没有活跃 writer，再人工删除 `<target>.lock` 和遗留的 `.mdv-*.tmp`。这是保守恢复契约，不是自动 crash recovery。
+
+save 保留原目标的 POSIX mode，但原子替换会更换 inode，因此 owner/group、ACL、xattr、Finder tags 和 Windows DACL/attributes 不属于保持契约。POSIX 路径会 fsync 父目录；Windows 只保证临时文件刷新与依赖系统 rename/link 的原子可见性，断电目录项持久性尚未达到同等级，也尚未经过 Windows CI 实测。
 
 ### 8.3 Mutation plan
 
@@ -638,17 +656,17 @@ type PackageMutation =
 任意宿主 adapter 的最小 Core 调用流程：
 
 ```ts
-const document = await openMdv(filePath)
+let document = await openMdv(filePath)
 let generation = document.manifest.generation
 
 editor.setContent(await document.readDocumentText())
 
-const result = await document.saveDocument({
+document = await document.saveDocument({
   markdown: editor.getMarkdown(),
   expectedGeneration: generation,
 })
 
-generation = result.generation
+generation = document.manifest.generation
 ```
 
 adapter 另外负责：
@@ -731,7 +749,9 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 3. 实现 archive 只读入口、格式 DTO 和资源限制。
 4. 实现 Core hydrate、invariants、索引与 trace 查询。
 5. 接出只读 public API 和 bytes/text 内容接口。
-6. 实现 transaction、save、commit、checkout 和冲突测试。
-7. 实现源文本 Diff 和内容寻址外部资源闭环，完成 Core 验收后再启动 VS Code extension。
+6. 实现 M3 transaction、create/save 和冲突测试。
+7. 实现 M4 commit/checkout，并复用 M3 事务路径。
+8. 实现 M5 源文本 Diff、漂移、verify/export，再完成内容寻址外部资源闭环。
+9. 完成 Core 的发布与兼容性验收后再启动 VS Code extension。
 
 第一阶段不做 Markdown AST 抽象、不做通用 Repository、不做插件系统，也不为了 path-only 工具增加临时文件协议。先完成 Core 的可读、可写、可追踪和并发安全闭环；Agent 可装配 CLI 由独立上游项目基于 public API 实现。

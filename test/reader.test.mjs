@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import * as yazl from 'yazl'
+
 import { ArchiveError } from '../dist/archive/errors.js'
 import { parseJsonEntry } from '../dist/archive/json.js'
 import {
@@ -68,6 +70,53 @@ test('keeps malformed ZIP bytes classified as an invalid archive', async () => {
   )
 })
 
+test('rejects a ZIP64 container even when its MDV layout is otherwise valid', async () => {
+  await assert.rejects(
+    openArchiveFromBytes(await createMinimalZip64Mdv()),
+    (error) => isArchiveError(error, 'INVALID_ARCHIVE'),
+  )
+})
+
+test('rejects a classic EOCD whose central directory starts on another disk', async () => {
+  const bytes = mutateClassicEocd(
+    await readFile('fixtures/valid/empty.mdv'),
+    (archive, eocdOffset) => archive.writeUInt16LE(1, eocdOffset + 6),
+  )
+
+  await assert.rejects(
+    openArchiveFromBytes(bytes),
+    (error) => isArchiveError(error, 'INVALID_ARCHIVE'),
+  )
+})
+
+test('rejects a classic EOCD whose per-disk and total entry counts differ', async () => {
+  const bytes = mutateClassicEocd(
+    await readFile('fixtures/valid/empty.mdv'),
+    (archive, eocdOffset) => {
+      const totalEntries = archive.readUInt16LE(eocdOffset + 10)
+      archive.writeUInt16LE(totalEntries === 0 ? 1 : totalEntries - 1, eocdOffset + 8)
+    },
+  )
+
+  await assert.rejects(
+    openArchiveFromBytes(bytes),
+    (error) => isArchiveError(error, 'INVALID_ARCHIVE'),
+  )
+})
+
+test('rejects a central-directory entry that starts on another disk', async () => {
+  const bytes = Buffer.from(await readFile('fixtures/valid/empty.mdv'))
+  const centralDirectoryOffset = bytes.indexOf(Buffer.from('504b0102', 'hex'))
+
+  assert.notEqual(centralDirectoryOffset, -1)
+  bytes.writeUInt16LE(1, centralDirectoryOffset + 34)
+
+  await assert.rejects(
+    openArchiveFromBytes(bytes),
+    (error) => isArchiveError(error, 'INVALID_ARCHIVE'),
+  )
+})
+
 test('rejects the UTF-8 BOM forbidden by the format', async () => {
   assert.throws(
     () => parseJsonEntry(
@@ -103,4 +152,38 @@ function isArchiveError(error, code) {
   assert.ok(error instanceof ArchiveError)
   assert.equal(error.code, code)
   return true
+}
+
+async function createMinimalZip64Mdv() {
+  const zip = new yazl.ZipFile()
+  zip.addBuffer(Buffer.from(JSON.stringify({
+    format: 'mdv',
+    formatVersion: '0.1',
+    documentId: 'd_00000000000000000000000000000000',
+    generation: 0,
+    markdownProfile: 'gfm',
+  })), 'manifest.json')
+  zip.addBuffer(Buffer.alloc(0), 'ref_tree/current.md')
+  zip.addBuffer(Buffer.alloc(0), 'doc_tree/current.md')
+  zip.end({ forceZip64Format: true, comment: '' })
+
+  const chunks = []
+  for await (const chunk of zip.outputStream) {
+    chunks.push(Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
+}
+
+function mutateClassicEocd(bytes, mutate) {
+  const archive = Buffer.from(bytes)
+  const signature = Buffer.from('504b0506', 'hex')
+  const eocdOffset = archive.lastIndexOf(signature)
+
+  assert.notEqual(eocdOffset, -1)
+  assert.equal(
+    eocdOffset + 22 + archive.readUInt16LE(eocdOffset + 20),
+    archive.byteLength,
+  )
+  mutate(archive, eocdOffset)
+  return archive
 }

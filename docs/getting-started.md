@@ -1,6 +1,6 @@
 # 快速开始
 
-本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的 M2 只读 API 打开一个 `.mdv` 文件。
+本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的 M3 API 创建、打开和保存一个 `.mdv` 文件。
 
 ## 环境要求
 
@@ -26,7 +26,31 @@ npm run build
 npm install /absolute/path/to/mdv
 ```
 
-重新拉取或修改 Core 源码后，请先重新执行 `npm run build`，再更新调用方的本地依赖。正式发布阶段会补齐不依赖仓库内 `dist/` 的安装生命周期。
+仓库通过 `prepare` 在安装或打包时生成 `dist/`；调用方不依赖仓库里预先存在或提交的构建产物。修改 Core 源码后，重新安装本地依赖即可更新调用方副本。
+
+## 创建并保存
+
+```ts
+import { createMdv } from '@mdv/core'
+
+let mdv = await createMdv('/documents/example.mdv')
+
+mdv = await mdv.saveReference({
+  markdown: '# Reference\n\n这里可以为空，也可以保存需求或摘要。\n',
+  expectedGeneration: mdv.manifest.generation,
+})
+
+mdv = await mdv.saveDocument({
+  markdown: '# Document\r\n\r\n正文。\r\n',
+  expectedGeneration: mdv.manifest.generation,
+})
+
+console.log(mdv.manifest.generation) // 2
+```
+
+`createMdv()` 创建 generation 0、两份空工作副本、零 Version 和零 Head；目标已存在时返回 `CONFLICT`，不会覆盖。每次 save 只修改一份工作副本、把 generation 精确增加 1，并返回一个新的 `MdvDocument`。旧对象仍代表旧快照，因此应始终接住返回值。
+
+save 不等于 commit。上面的两次保存不会创建历史 Version；commit 与 checkout 将在 M4 提供。
 
 ## 打开文件
 
@@ -90,6 +114,26 @@ if (head !== null) {
 
 版本列表只包含轻量元数据。调用 `readVersionBytes(id)` 或 `readVersionText(id)` 时，Core 才按需读取并校验该历史正文。
 
+## 处理并发冲突
+
+`expectedGeneration` 是显式的比较后交换条件。两个 writer 从同一 generation 保存时，最多一个提交；另一个得到 `MdvError` 的 `CONFLICT`：
+
+```ts
+try {
+  mdv = await mdv.saveDocument({
+    markdown: nextMarkdown,
+    expectedGeneration: mdv.manifest.generation,
+  })
+} catch (error) {
+  if (error instanceof MdvError && error.code === 'CONFLICT') {
+    mdv = await openMdv(mdv.packagePath)
+    // 交给宿主比较/合并，而不是无条件覆盖。
+  } else {
+    throw error
+  }
+}
+```
+
 ## 交给 Markdown 工具
 
 Core 不解析或渲染 Markdown。把返回的字符串交给上层 parser/editor，并把 `baseDirectory` 交给其资源解析层：
@@ -107,6 +151,6 @@ editor.setMarkdown(new TextDecoder().decode(source.bytes), {
 ## 下一步
 
 - 阅读[核心概念](./concepts.md)理解 Reference、Document 和 bind；
-- 阅读[API 参考](./api-reference.md)查看完整的 M2 契约；
+- 阅读[API 参考](./api-reference.md)查看完整的 M3 契约；
 - 阅读[图片与相对资源](./resources.md)处理图片路径；
-- 需要写入能力时关注[开发路线图](./design/roadmap.md)，不要直接修改 ZIP entry。
+- 需要 commit、checkout 或 review 能力时关注[开发路线图](./design/roadmap.md)，不要直接修改 ZIP entry。

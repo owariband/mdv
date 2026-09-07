@@ -23,6 +23,15 @@ export interface ParseOptions extends OpenOptions {
   readonly baseDirectory?: string
 }
 
+export interface CreateOptions extends OpenOptions {
+  readonly markdownProfile?: string
+}
+
+export interface SaveInput {
+  readonly markdown: string | Uint8Array
+  readonly expectedGeneration: number
+}
+
 export interface Actor {
   readonly type: 'human' | 'agent'
   readonly id?: string
@@ -127,4 +136,7 @@ export interface DocumentSnapshot {
 export interface MdvDocument extends DocumentSnapshot {
   readonly packagePath: string
   readonly baseDirectory: string
+
+  saveReference(input: SaveInput): Promise<MdvDocument>
+  saveDocument(input: SaveInput): Promise<MdvDocument>
 }

@@ -33,6 +33,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "fixtures": "node scripts/build-fixtures.mjs",
+    "prepare": "npm run build",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "engines": {
@@ -41,9 +42,11 @@
   "license": "UNLICENSED",
   "devDependencies": {
     "@types/yauzl": "^3.4.0",
+    "@types/yazl": "3.3.1",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "yauzl": "^3.4.0"
+    "yauzl": "^3.4.0",
+    "yazl": "3.3.1"
   }
 }

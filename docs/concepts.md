@@ -27,7 +27,7 @@ Reference 可以一直为空。此时 MDV 就退化为带显式版本能力的�
 
 新建文档从 generation 0、两份空工作副本、零版本和零 Head 开始，不会预先制造空的 R1/D1。
 
-当前 M2 API 只能读取这些状态。`create`、`save` 和 `commit` 是格式已经确定、但代码尚未提供的后续能力。
+当前 M3 API 已提供 `createMdv`、`saveReference` 和 `saveDocument`。`commit` 与 `checkout` 的格式语义已经确定，但代码尚未提供。
 
 ## 两棵独立历史
 
@@ -61,7 +61,7 @@ Reference Version 不保存反向列表。Core 在打开文档时扫描 Document
 
 ## Head、历史与 Trace
 
-每棵树各有一个可选 Head，指向当前工作副本所基于的版本。M2 提供三类查看方式：
+每棵树各有一个可选 Head，指向当前工作副本所基于的版本。公开 API 提供三类查看方式：
 
 - `getHistory()`：从指定版本或 Head 沿 parent 返回到根；
 - `getChildren()`：查看某个版本直接产生的分叉；
@@ -81,11 +81,11 @@ Core 保存和返回原始 UTF-8 Markdown 字节，不生成 AST 或 HTML，也�
 
 ## generation 不是 Version
 
-`manifest.generation` 用于未来写事务的并发比较后交换。普通 save、commit、checkout 都会改变包并递增 generation；Version 只在显式 commit 时创建。两者不能混为一谈。
+`manifest.generation` 用于写事务的并发比较后交换。M3 的 save 已要求调用方传入 `expectedGeneration`；成功时返回新快照并把 generation 精确增加 1，冲突时不会覆盖磁盘。未来的 commit、checkout 同样会递增 generation；Version 只在显式 commit 时创建。两者不能混为一谈。
 
 ## 下一步阅读
 
 - [快速开始](./getting-started.md)
-- [M2 API 参考](./api-reference.md)
+- [M3 API 参考](./api-reference.md)
 - [图片与相对资源](./resources.md)
 - [Format 0.1](../spec/format-0.1.md)

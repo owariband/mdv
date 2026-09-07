@@ -1,13 +1,19 @@
+import { randomBytes } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 
 import { ArchiveError } from './archive/errors.js'
+import type { ManifestFileDto } from './archive/format-dto.js'
+import { canonicalizeTargetPath } from './archive/lock.js'
+import { resolveReadLimits } from './archive/limits.js'
 import {
   openArchiveFromBytes,
   openArchiveFromPath,
+  validateMarkdownBytes,
 } from './archive/reader.js'
 import type { OpenedArchive } from './archive/reader.js'
 import { compareRfc3339 } from './archive/rfc3339.js'
+import { runArchiveTransaction } from './archive/transaction.js'
 import { hydrateArchiveIndex } from './core/hydrate.js'
 import type { VersionId as CoreVersionId } from './core/ids.js'
 import { GraphValidationError } from './core/invariants.js'
@@ -25,6 +31,7 @@ import {
 import { MdvError } from './errors.js'
 import type {
   Actor,
+  CreateOptions,
   DocumentId,
   DocumentSnapshot,
   DocumentTrace,
@@ -36,6 +43,7 @@ import type {
   ParseOptions,
   ReferenceTrace,
   ReferenceVersionSummary,
+  SaveInput,
   TreeKind,
   VersionId,
   VersionQuery,
@@ -43,19 +51,21 @@ import type {
 } from './types.js'
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+const MARKDOWN_PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
 export async function parseMdv(
   bytes: Uint8Array,
   options: ParseOptions = {},
 ): Promise<DocumentSnapshot> {
+  const readOptions = copyOpenOptions(options)
+  const baseDirectory = options.baseDirectory === undefined
+    ? null
+    : resolve(options.baseDirectory)
   try {
-    const archive = await openArchiveFromBytes(bytes, options.limits === undefined
+    const archive = await openArchiveFromBytes(bytes, readOptions.limits === undefined
       ? {}
-      : { limits: options.limits })
-    const baseDirectory = options.baseDirectory === undefined
-      ? null
-      : resolve(options.baseDirectory)
-    return createSnapshot(archive, null, baseDirectory)
+      : { limits: readOptions.limits })
+    return createReadonlySnapshot(archive, baseDirectory)
   } catch (cause) {
     throw toMdvError(cause, 'Failed to parse MDV document')
   }
@@ -66,29 +76,79 @@ export async function openMdv(
   options: OpenOptions = {},
 ): Promise<MdvDocument> {
   const packagePath = resolve(path)
+  const readOptions = copyOpenOptions(options)
   try {
-    const archive = await openArchiveFromPath(packagePath, options.limits === undefined
+    const targetPath = await canonicalizeTargetPath(packagePath)
+    const archive = await openArchiveFromPath(targetPath, readOptions.limits === undefined
       ? {}
-      : { limits: options.limits })
-    return createSnapshot(archive, packagePath, dirname(packagePath))
+      : { limits: readOptions.limits })
+    return createFileDocument(archive, packagePath, targetPath, readOptions)
   } catch (cause) {
     throw toMdvError(cause, `Failed to open MDV document ${packagePath}`)
   }
 }
 
-function createSnapshot<TPath extends string | null>(
-  archive: OpenedArchive,
-  packagePath: TPath,
-  baseDirectory: TPath,
-): ReadonlyDocumentSnapshot<TPath> {
-  const state = hydrateArchiveIndex({
-    manifest: archive.manifest,
-    referenceHead: archive.referenceHead,
-    documentHead: archive.documentHead,
-    referenceVersions: archive.referenceVersions,
-    documentVersions: archive.documentVersions,
+export async function createMdv(
+  path: string,
+  options: CreateOptions = {},
+): Promise<MdvDocument> {
+  const packagePath = resolve(path)
+  const readOptions = copyOpenOptions(options)
+  const markdownProfile = normalizeMarkdownProfile(options.markdownProfile)
+  const manifest: ManifestFileDto = Object.freeze({
+    format: 'mdv',
+    formatVersion: '0.1',
+    documentId: `d_${randomBytes(16).toString('hex')}`,
+    generation: 0,
+    markdownProfile,
   })
-  return new ReadonlyDocumentSnapshot(archive, state, packagePath, baseDirectory)
+  let committedGeneration: number | undefined
+
+  try {
+    const result = await runArchiveTransaction(
+      packagePath,
+      { type: 'create', manifest },
+      {
+        ...(readOptions.limits === undefined ? {} : { limits: readOptions.limits }),
+        validate: validateArchiveGraph,
+      },
+    )
+    committedGeneration = result.archive.manifest.generation
+    return createFileDocument(result.archive, packagePath, result.targetPath, readOptions)
+  } catch (cause) {
+    if (committedGeneration !== undefined) {
+      throw committedResultError(cause, packagePath, committedGeneration)
+    }
+    throw toMdvError(cause, `Failed to create MDV document ${packagePath}`)
+  }
+}
+
+function createReadonlySnapshot(
+  archive: OpenedArchive,
+  baseDirectory: string | null,
+): DocumentSnapshot {
+  return Object.freeze(new ReadonlyDocumentSnapshot(
+    archive,
+    hydrateOpenedArchive(archive),
+    null,
+    baseDirectory,
+  ))
+}
+
+function createFileDocument(
+  archive: OpenedArchive,
+  packagePath: string,
+  targetPath: string,
+  options: OpenOptions,
+): MdvDocument {
+  return new FileMdvDocument(
+    archive,
+    hydrateOpenedArchive(archive),
+    packagePath,
+    dirname(packagePath),
+    targetPath,
+    copyOpenOptions(options),
+  )
 }
 
 class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentSnapshot {
@@ -153,8 +213,6 @@ class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentS
       ...this.#referenceVersions,
       ...this.#documentVersions,
     ])
-
-    Object.freeze(this)
   }
 
   listVersions(query: { readonly tree: 'reference' }): readonly ReferenceVersionSummary[]
@@ -326,6 +384,178 @@ class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentS
     }
     return summary
   }
+}
+
+class FileMdvDocument extends ReadonlyDocumentSnapshot<string> implements MdvDocument {
+  readonly #openOptions: OpenOptions
+  readonly #targetPath: string
+
+  constructor(
+    archive: OpenedArchive,
+    state: MdvState,
+    packagePath: string,
+    baseDirectory: string,
+    targetPath: string,
+    openOptions: OpenOptions,
+  ) {
+    super(archive, state, packagePath, baseDirectory)
+    this.#openOptions = openOptions
+    this.#targetPath = targetPath
+    Object.freeze(this)
+  }
+
+  async saveReference(input: SaveInput): Promise<MdvDocument> {
+    return saveWorkingCopy(
+      this.packagePath,
+      this.#targetPath,
+      this.manifest.documentId,
+      'reference',
+      input,
+      this.#openOptions,
+    )
+  }
+
+  async saveDocument(input: SaveInput): Promise<MdvDocument> {
+    return saveWorkingCopy(
+      this.packagePath,
+      this.#targetPath,
+      this.manifest.documentId,
+      'document',
+      input,
+      this.#openOptions,
+    )
+  }
+}
+
+async function saveWorkingCopy(
+  packagePath: string,
+  targetPath: string,
+  expectedDocumentId: DocumentId,
+  tree: TreeKind,
+  input: SaveInput,
+  options: OpenOptions,
+): Promise<MdvDocument> {
+  validateSaveInput(input)
+  const maxEntryBytes = resolveReadLimits(options.limits).maxEntryBytes
+  const markdownBytes = typeof input.markdown === 'string'
+    ? Buffer.byteLength(input.markdown, 'utf8')
+    : input.markdown.byteLength
+  if (markdownBytes > maxEntryBytes) {
+    throw new MdvError(
+      'LIMIT_EXCEEDED',
+      `Markdown content exceeds ${maxEntryBytes} bytes`,
+      { details: { tree, actualBytes: markdownBytes, maxEntryBytes } },
+    )
+  }
+  const markdown = typeof input.markdown === 'string'
+    ? Buffer.from(input.markdown, 'utf8')
+    : Uint8Array.from(input.markdown)
+  try {
+    validateMarkdownBytes(markdown, `${tree === 'reference' ? 'ref_tree' : 'doc_tree'}/current.md`)
+  } catch (cause) {
+    throw toMdvError(cause, `Invalid ${tree} Markdown`)
+  }
+
+  let currentTargetPath: string
+  try {
+    currentTargetPath = await canonicalizeTargetPath(packagePath)
+  } catch (cause) {
+    throw toMdvError(cause, `Failed to resolve MDV document ${packagePath}`)
+  }
+  if (currentTargetPath !== targetPath) {
+    throw new MdvError('CONFLICT', `MDV path now resolves to a different target: ${packagePath}`, {
+      details: {
+        reason: 'target-path-changed',
+        expectedTargetPath: targetPath,
+        actualTargetPath: currentTargetPath,
+      },
+    })
+  }
+
+  let committedGeneration: number | undefined
+  try {
+    const result = await runArchiveTransaction(
+      targetPath,
+      {
+        type: 'save-working-copy',
+        tree,
+        markdown,
+        expectedDocumentId,
+        expectedGeneration: input.expectedGeneration,
+      },
+      {
+        ...(options.limits === undefined ? {} : { limits: options.limits }),
+        validate: validateArchiveGraph,
+      },
+    )
+    committedGeneration = result.archive.manifest.generation
+    return createFileDocument(result.archive, packagePath, result.targetPath, options)
+  } catch (cause) {
+    if (committedGeneration !== undefined) {
+      throw committedResultError(cause, packagePath, committedGeneration)
+    }
+    throw toMdvError(cause, `Failed to save ${tree} working copy`)
+  }
+}
+
+function hydrateOpenedArchive(archive: OpenedArchive): MdvState {
+  return hydrateArchiveIndex({
+    manifest: archive.manifest,
+    referenceHead: archive.referenceHead,
+    documentHead: archive.documentHead,
+    referenceVersions: archive.referenceVersions,
+    documentVersions: archive.documentVersions,
+  })
+}
+
+function validateArchiveGraph(archive: OpenedArchive): void {
+  hydrateOpenedArchive(archive)
+}
+
+function copyOpenOptions(options: OpenOptions): OpenOptions {
+  return Object.freeze(options.limits === undefined
+    ? {}
+    : { limits: Object.freeze({ ...options.limits }) })
+}
+
+function normalizeMarkdownProfile(value: string | undefined): string {
+  if (value === undefined) {
+    return 'gfm'
+  }
+  if (typeof value !== 'string' || !MARKDOWN_PROFILE.test(value)) {
+    throw new TypeError('markdownProfile must be a lowercase profile token up to 64 characters')
+  }
+  return value
+}
+
+function validateSaveInput(input: SaveInput): void {
+  if (input === null || typeof input !== 'object') {
+    throw new TypeError('Save input must be an object')
+  }
+  if (!Number.isSafeInteger(input.expectedGeneration) || input.expectedGeneration < 0) {
+    throw new RangeError('expectedGeneration must be a non-negative safe integer')
+  }
+  if (typeof input.markdown !== 'string' && !(input.markdown instanceof Uint8Array)) {
+    throw new TypeError('markdown must be a string or Uint8Array')
+  }
+}
+
+function committedResultError(
+  cause: unknown,
+  packagePath: string,
+  generation: number,
+): MdvError {
+  const mapped = toMdvError(cause, `Failed to build committed MDV document ${packagePath}`)
+  return new MdvError(mapped.code, mapped.message, {
+    details: {
+      ...mapped.details,
+      path: packagePath,
+      stage: 'build-result',
+      committed: true,
+      generation,
+    },
+    cause: mapped,
+  })
 }
 
 function toReferenceSummary(version: CoreReferenceVersion): ReferenceVersionSummary {

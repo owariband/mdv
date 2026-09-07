@@ -111,6 +111,10 @@ export function decodeDocumentVersionValue(
   return decodeVersionValue(input, 'document-version', DOCUMENT_VERSION_FIELDS, true)
 }
 
+export function encodeManifestValue(value: ManifestFileDto): Uint8Array {
+  return encodeJson(decodeManifestValue(value).value)
+}
+
 function decodeVersionValue(
   input: unknown,
   kind: 'reference-version',
@@ -241,7 +245,7 @@ function readPatternString(
   issues: FormatIssue[],
 ): string {
   const value = readString(record, key, path, issues)
-  if (value !== '' && !pattern.test(value)) {
+  if (typeof record[key] === 'string' && !pattern.test(value)) {
     issues.push({ path: `${path}/${key}`, message: `must match ${pattern.source}` })
   }
   return value
@@ -352,4 +356,8 @@ function throwIfInvalid(kind: FormatFileKind, issues: FormatIssue[]): void {
   if (issues.length > 0) {
     throw new FormatDecodeError(kind, issues)
   }
+}
+
+function encodeJson(value: JsonObject): Uint8Array {
+  return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
