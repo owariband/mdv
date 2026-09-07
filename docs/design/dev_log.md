@@ -11,11 +11,11 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
-## 待提交 — `feat: complete M5 agent-friendly review primitives`
+## `43b4bef` — `feat: complete M5 agent-friendly review primitives`
 
+- 完整 SHA：`43b4befebc140f91482fe455f4fdca9615c52879`
 - 日期：2026-09-08
 - 里程碑：M5 Agent-friendly 审阅与诊断能力
-- 状态：实现与验收已完成，等待用户确认后创建并推送 commit；提交后将本节替换为真实短 SHA / 完整 SHA，不改写既有历史。
 
 ### 详细提交说明
 
