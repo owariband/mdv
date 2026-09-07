@@ -2,6 +2,22 @@
 
 MDV 在 Markdown 之上增加版本与来源追踪，但不改变 Markdown 语法。理解它只需要区分工作副本、版本和两棵历史树。
 
+## 普通 Markdown 是编辑底座
+
+不执行版本操作时，`current.md` 本质上就是普通 Markdown 工作副本，MDV 不为编辑过程增加另一套文档模型：
+
+```text
+编辑器内存 buffer -> save -> current.md -> explicit commit -> Version
+     宿主管理                 Core 持久化             不可变快照
+```
+
+- 编辑器内存中的未保存内容由 VS Code、MarkText 等宿主管理；
+- Core 的 save 只保存目标 `current.md`、执行 generation CAS，不创建 Version、不移动 Head；
+- 不存在 `DraftVersion`、`workspace` 或 pending bind；
+- Document bind 只记录在 commit 后的 Document Version 中。
+
+因此多个进程同时保存时，冲突语义也和普通 Markdown 被外部修改相同：Core 返回 `CONFLICT` 并阻止静默覆盖，宿主决定重载、比较、合并或另存为。
+
 ## 一个容器，两份工作副本
 
 每个 `.mdv` 始终包含：
@@ -27,7 +43,7 @@ Reference 可以一直为空。此时 MDV 就退化为带显式版本能力的�
 
 新建文档从 generation 0、两份空工作副本、零版本和零 Head 开始，不会预先制造空的 R1/D1。
 
-当前 M3 API 已提供 `createMdv`、`saveReference` 和 `saveDocument`。`commit` 与 `checkout` 的格式语义已经确定，但代码尚未提供。
+当前 API 已提供 `createMdv`、`saveReference`、`saveDocument`、两种 commit 和两种 checkout。commit 读取已经 save 的 `current.md`，而不是接收另一份 Markdown；checkout 用历史正文替换工作副本并移动对应 Head，但不创建或删除 Version。
 
 ## 两棵独立历史
 
@@ -59,6 +75,8 @@ Reference Version 不保存反向列表。Core 在打开文档时扫描 Document
 
 `referenceVersion = null` 表示该 Document Version 没有 Reference 依赖，不是错误。
 
+工作副本不保存“准备绑定哪个 Reference”之类的 pending 状态。宿主可以在自己的 UI 或任务上下文中暂存选择，但只有显式 `commitDocument()` 时传入并写入不可变版本的 bind 才是 MDV 的持久事实。
+
 ## Head、历史与 Trace
 
 每棵树各有一个可选 Head，指向当前工作副本所基于的版本。公开 API 提供三类查看方式：
@@ -81,11 +99,11 @@ Core 保存和返回原始 UTF-8 Markdown 字节，不生成 AST 或 HTML，也�
 
 ## generation 不是 Version
 
-`manifest.generation` 用于写事务的并发比较后交换。M3 的 save 已要求调用方传入 `expectedGeneration`；成功时返回新快照并把 generation 精确增加 1，冲突时不会覆盖磁盘。未来的 commit、checkout 同样会递增 generation；Version 只在显式 commit 时创建。两者不能混为一谈。
+`manifest.generation` 用于写事务的并发比较后交换。save、commit 和 checkout 都要求调用方传入 `expectedGeneration`；成功时返回新快照并把 generation 精确增加 1，冲突时不会覆盖磁盘。Version 只在显式 commit 时创建。两者不能混为一谈。
 
 ## 下一步阅读
 
 - [快速开始](./getting-started.md)
-- [M3 API 参考](./api-reference.md)
+- [当前 API 参考](./api-reference.md)
 - [图片与相对资源](./resources.md)
 - [Format 0.1](../spec/format-0.1.md)

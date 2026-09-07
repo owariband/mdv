@@ -8,7 +8,9 @@
 
 ## 当前综合结论
 
-MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 已完成 M3 创建、读取、工作副本保存和 POSIX 本地原子文件事务；下一阶段是 M4 commit/checkout。
+MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 已完成 M4：创建、读取、普通 Markdown 工作副本保存、commit、checkout、trace 和 POSIX 本地原子文件事务均已从 package root 提供；下一阶段是 M5 Review 与完整性能力。
+
+M4 没有增加另一套 Draft 模型：编辑器内存 buffer 归宿主，Core 只持久化 `current.md`，显式 commit 才创建 Version。多进程写冲突由 Core 报告 `CONFLICT`，重载或合并策略仍由宿主决定。
 
 ## 页面
 

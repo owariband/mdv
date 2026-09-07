@@ -12,7 +12,6 @@ import { dirname, join } from 'node:path'
 import { encodeManifestValue } from './codec.js'
 import { ArchiveError } from './errors.js'
 import type { ManifestFileDto } from './format-dto.js'
-import { replaceTopLevelJsonSafeInteger } from './json.js'
 import { resolveReadLimits } from './limits.js'
 import {
   acquireArchiveLock,
@@ -23,10 +22,13 @@ import { openArchiveFromPath } from './reader.js'
 import type {
   ArchiveReadOptions,
   ArchiveTreeKind,
-  ArchiveVersionContent,
-  ArchiveVersionEntry,
   OpenedArchive,
 } from './reader.js'
+import { createMutationEntryPlan } from './mutation.js'
+import type {
+  ArchiveMutationEntryPlan,
+  ArchivePackageMutation,
+} from './mutation.js'
 import { writeArchive } from './writer.js'
 import type { ArchiveWriteEntry } from './writer.js'
 
@@ -43,9 +45,23 @@ export type ArchiveTransactionCommand =
       readonly expectedGeneration: number
     }
 
+export interface PlannedArchiveTransactionCommand<TResult> {
+  readonly type: 'planned-mutation'
+  readonly expectedDocumentId: string
+  readonly expectedGeneration: number
+  prepare(source: OpenedArchive): Promise<{
+    readonly mutation: ArchivePackageMutation
+    readonly value: TResult
+  }>
+}
+
 export interface ArchiveTransactionResult {
   readonly archive: OpenedArchive
   readonly targetPath: string
+}
+
+export interface PlannedArchiveTransactionResult<TResult> extends ArchiveTransactionResult {
+  readonly value: TResult
 }
 
 export type TransactionCheckpoint =
@@ -88,14 +104,14 @@ interface TargetIdentity {
   readonly mode: number
 }
 
-interface SavedEntryPlan {
-  readonly entries: readonly ArchiveWriteEntry[]
-  finish(): Promise<void>
-  close(): Promise<void>
-}
-
 interface CleanupFailure {
-  readonly resource: 'source-archive' | 'result-archive' | 'temp-file' | 'lock' | 'lock-directory'
+  readonly resource:
+    | 'source-archive'
+    | 'result-archive'
+    | 'version-stream'
+    | 'temp-file'
+    | 'lock'
+    | 'lock-directory'
   readonly path: string
   readonly cause: unknown
 }
@@ -107,11 +123,21 @@ class ArchiveGraphValidationFailure extends Error {
   }
 }
 
-export async function runArchiveTransaction(
+export function runArchiveTransaction<TResult>(
+  targetPath: string,
+  command: PlannedArchiveTransactionCommand<TResult>,
+  options: ArchiveTransactionOptions,
+): Promise<PlannedArchiveTransactionResult<TResult>>
+export function runArchiveTransaction(
   targetPath: string,
   command: ArchiveTransactionCommand,
   options: ArchiveTransactionOptions,
-): Promise<ArchiveTransactionResult> {
+): Promise<ArchiveTransactionResult>
+export async function runArchiveTransaction<TResult>(
+  targetPath: string,
+  command: ArchiveTransactionCommand | PlannedArchiveTransactionCommand<TResult>,
+  options: ArchiveTransactionOptions,
+): Promise<ArchiveTransactionResult | PlannedArchiveTransactionResult<TResult>> {
   const readLimits = resolveReadLimits(options.limits)
   const readOptions: ArchiveReadOptions = { limits: readLimits }
   const canonicalPath = await canonicalizeTargetPath(targetPath)
@@ -125,7 +151,9 @@ export async function runArchiveTransaction(
   let tempPath: string | undefined
   let sourceArchive: OpenedArchive | undefined
   let resultArchive: OpenedArchive | undefined
-  let savedEntryPlan: SavedEntryPlan | undefined
+  let mutationEntryPlan: ArchiveMutationEntryPlan | undefined
+  let mutationValue: TResult | undefined
+  let mutationCloseFailure: unknown
   let failure: unknown
   let stage = 'prepare'
 
@@ -182,23 +210,50 @@ export async function runArchiveTransaction(
       }
 
       nextGeneration = previousGeneration + 1
+      let mutation: ArchivePackageMutation
+      if (command.type === 'save-working-copy') {
+        mutation = {
+          type: 'replace-working-copy',
+          tree: command.tree,
+          markdown: command.markdown,
+        }
+      } else {
+        stage = 'plan-mutation'
+        const prepared = await command.prepare(sourceArchive)
+        mutation = prepared.mutation
+        mutationValue = prepared.value
+      }
+
       stage = 'read-source'
-      savedEntryPlan = await createSavedEntries(
+      mutationEntryPlan = await createMutationEntryPlan(
         sourceArchive,
-        command,
+        mutation,
         nextGeneration,
-        readLimits.maxJsonDepth,
+        readLimits,
       )
-      entries = savedEntryPlan.entries
+      entries = mutationEntryPlan.entries
     }
 
     tempPath = uniqueTempPath(canonicalPath)
     stage = 'write-temp'
+    let entryFailure: unknown
     try {
       await writeArchive(tempPath, entries)
-      await savedEntryPlan?.finish()
-    } finally {
-      await savedEntryPlan?.close()
+      await mutationEntryPlan?.finish()
+    } catch (cause) {
+      entryFailure = cause
+    }
+    try {
+      await mutationEntryPlan?.close()
+    } catch (cause) {
+      if (entryFailure === undefined) {
+        entryFailure = cause
+      } else {
+        mutationCloseFailure = cause
+      }
+    }
+    if (entryFailure !== undefined) {
+      throw entryFailure
     }
     await runCheckpoint(options.hooks, 'after-temp-write', context())
 
@@ -275,6 +330,13 @@ export async function runArchiveTransaction(
   }
 
   const cleanupFailures: CleanupFailure[] = []
+  if (mutationCloseFailure !== undefined) {
+    cleanupFailures.push({
+      resource: 'version-stream',
+      path: canonicalPath,
+      cause: mutationCloseFailure,
+    })
+  }
   try {
     await sourceArchive?.close()
   } catch (cause) {
@@ -331,7 +393,11 @@ export async function runArchiveTransaction(
     await resultArchive?.close().catch(() => undefined)
     throw new ArchiveError('IO_ERROR', 'Archive transaction completed without a result')
   }
-  return Object.freeze({ archive: resultArchive, targetPath: publishedPath })
+  const result = Object.freeze({ archive: resultArchive, targetPath: publishedPath })
+  if (command.type !== 'planned-mutation') {
+    return result
+  }
+  return Object.freeze({ ...result, value: mutationValue as TResult })
 
   function context(): TransactionCheckpointContext {
     return {
@@ -350,139 +416,6 @@ function createInitialEntries(manifest: ManifestFileDto): readonly ArchiveWriteE
     { name: 'ref_tree/current.md', bytes: new Uint8Array() },
     { name: 'doc_tree/current.md', bytes: new Uint8Array() },
   ]
-}
-
-async function createSavedEntries(
-  source: OpenedArchive,
-  command: Extract<ArchiveTransactionCommand, { readonly type: 'save-working-copy' }>,
-  nextGeneration: number,
-  maxJsonDepth: number,
-): Promise<SavedEntryPlan> {
-  const entries: ArchiveWriteEntry[] = [{
-    name: 'manifest.json',
-    bytes: replaceTopLevelJsonSafeInteger(
-      await source.readManifestBytes(),
-      'manifest.json',
-      'generation',
-      nextGeneration,
-      maxJsonDepth,
-    ),
-  }]
-
-  if (source.referenceHead !== null) {
-    entries.push({ name: 'ref_tree/HEAD', bytes: Buffer.from(`${source.referenceHead}\n`) })
-  }
-  if (source.documentHead !== null) {
-    entries.push({ name: 'doc_tree/HEAD', bytes: Buffer.from(`${source.documentHead}\n`) })
-  }
-
-  entries.push({
-    name: 'ref_tree/current.md',
-    bytes: command.tree === 'reference'
-      ? command.markdown
-      : await source.readWorkingCopy('reference'),
-  })
-  entries.push({
-    name: 'doc_tree/current.md',
-    bytes: command.tree === 'document'
-      ? command.markdown
-      : await source.readWorkingCopy('document'),
-  })
-
-  const versionReader = createVersionEntryReader(source)
-  for (const version of source.versionEntries) {
-    const treePath = version.tree === 'reference' ? 'ref_tree' : 'doc_tree'
-    const directory = `${treePath}/versions/${version.versionId}`
-    entries.push({
-      name: `${directory}/content.md`,
-      size: version.contentBytes,
-      read: () => versionReader.read(version, 'content'),
-    })
-    entries.push({
-      name: `${directory}/meta.json`,
-      size: version.metadataBytes,
-      read: () => versionReader.read(version, 'metadata'),
-    })
-  }
-
-  return Object.freeze({
-    entries,
-    finish: versionReader.finish,
-    close: versionReader.close,
-  })
-}
-
-function createVersionEntryReader(source: OpenedArchive): {
-  read(entry: ArchiveVersionEntry, part: 'content' | 'metadata'): Promise<Uint8Array>
-  finish(): Promise<void>
-  close(): Promise<void>
-} {
-  const iterator = source.versionEntries.length === 0
-    ? undefined
-    : source.readVersionContents()[Symbol.asyncIterator]()
-  let current: ArchiveVersionContent | undefined
-  let expectedPart: 'content' | 'metadata' = 'content'
-  let closed = false
-
-  return Object.freeze({
-    async read(entry, part): Promise<Uint8Array> {
-      if (closed || iterator === undefined) {
-        throw new ArchiveError('IO_ERROR', 'Historical entry reader is closed')
-      }
-      if (current === undefined) {
-        const next = await iterator.next()
-        if (next.done) {
-          throw new ArchiveError('INVALID_ARCHIVE', 'Historical entry stream ended early')
-        }
-        current = next.value
-      }
-      if (
-        current.tree !== entry.tree
-        || current.versionId !== entry.versionId
-        || part !== expectedPart
-      ) {
-        throw new ArchiveError(
-          'INVALID_ARCHIVE',
-          `Historical entry stream is out of order at ${entry.tree}/${entry.versionId}/${part}`,
-        )
-      }
-
-      if (part === 'content') {
-        expectedPart = 'metadata'
-        return current.bytes
-      }
-      const bytes = current.metadataBytes
-      current = undefined
-      expectedPart = 'content'
-      return bytes
-    },
-
-    async finish(): Promise<void> {
-      if (closed) {
-        return
-      }
-      if (iterator === undefined) {
-        closed = true
-        return
-      }
-      if (current !== undefined || expectedPart !== 'content') {
-        throw new ArchiveError('INVALID_ARCHIVE', 'Historical entry stream was not fully consumed')
-      }
-      const next = await iterator.next()
-      if (!next.done) {
-        throw new ArchiveError('INVALID_ARCHIVE', 'Historical entry stream contains extra content')
-      }
-      closed = true
-    },
-
-    async close(): Promise<void> {
-      if (closed) {
-        return
-      }
-      closed = true
-      await iterator?.return?.()
-    },
-  })
 }
 
 async function validateCompleteArchive(

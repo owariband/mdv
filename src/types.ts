@@ -38,6 +38,22 @@ export interface Actor {
   readonly name?: string
 }
 
+export interface CommitInput {
+  readonly expectedGeneration: number
+  readonly actor: Actor
+  readonly summary: string
+}
+
+export interface CommitDocumentInput extends CommitInput {
+  readonly referenceVersion: VersionId | null
+}
+
+export interface CheckoutInput {
+  readonly version: VersionId
+  readonly expectedGeneration: number
+  readonly discardChanges?: boolean
+}
+
 export interface ManifestSummary {
   readonly format: typeof MDV_FORMAT
   readonly formatVersion: typeof MDV_FORMAT_VERSION
@@ -139,4 +155,20 @@ export interface MdvDocument extends DocumentSnapshot {
 
   saveReference(input: SaveInput): Promise<MdvDocument>
   saveDocument(input: SaveInput): Promise<MdvDocument>
+  commitReference(input: CommitInput): Promise<CommitResult>
+  commitDocument(input: CommitDocumentInput): Promise<CommitResult>
+  checkoutReference(input: CheckoutInput): Promise<MdvDocument>
+  checkoutDocument(input: CheckoutInput): Promise<MdvDocument>
 }
+
+export type CommitResult =
+  | {
+      readonly created: true
+      readonly version: VersionId
+      readonly document: MdvDocument
+    }
+  | {
+      readonly created: false
+      readonly reason: 'no-changes'
+      readonly document: MdvDocument
+    }

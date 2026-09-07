@@ -1,6 +1,6 @@
-# M3 API 参考
+# 当前 API 参考
 
-本页只记录当前从 `@mdv/core` package root 导出的公开 API。M3 已提供创建、读取和工作副本保存；设计文档中尚未实现的 commit、checkout、diff、verify 和 export 不属于本页契约。
+本页只记录当前从 `@mdv/core` package root 导出的公开 API。M4 已提供创建、读取、工作副本保存、commit 和 checkout；尚未从 package root 导出的公开 dirty/drift、diff、verify、export 和资源 API 不属于当前契约。
 
 ## 运行环境与入口
 
@@ -65,7 +65,7 @@ interface CreateOptions extends OpenOptions {
 
 ## Snapshot 属性
 
-`DocumentSnapshot` 是 `parseMdv` 返回的纯只读快照。`MdvDocument` 来自路径，因而 `packagePath` 和 `baseDirectory` 一定是字符串，并额外提供两种 save 方法。
+`DocumentSnapshot` 是 `parseMdv` 返回的纯只读快照。`MdvDocument` 来自路径，因而 `packagePath` 和 `baseDirectory` 一定是字符串，并额外提供 save、commit 和 checkout 写方法。
 
 | 属性 | 类型 | 含义 |
 | --- | --- | --- |
@@ -209,10 +209,12 @@ interface MdvDocument extends DocumentSnapshot {
 
 - `saveReference` 只更新 `ref_tree/current.md`；`saveDocument` 只更新 `doc_tree/current.md`。
 - 两者都把 generation 精确增加 1，但不创建 Version、不移动 Head，也不改变任何既有历史正文或 metadata。
+- 两个 `current.md` 的编辑语义就是普通 Markdown 工作副本。编辑器内存 buffer 由宿主管理，Core 不保存未传入 save 的内容，也不建立额外 Draft model。
 - 成功结果是新的路径绑定 `MdvDocument`。原对象仍代表打开时刻的不可变快照，后续写入应使用返回对象。
 - `string` 按 UTF-8 编码；`Uint8Array` 会先复制。两者都必须是无 BOM 的合法 UTF-8，并受 `maxEntryBytes` 限制。
 - `expectedGeneration` 必须是非负安全整数。Core 在取得跨进程锁并重开最新归档后执行 CAS；不匹配时返回 `CONFLICT`，不自动重试。
 - 保存还校验打开时的 `documentId` 与规范目标路径，避免文件被另一个同 generation 文档替换或父目录 alias 被重定向后误写。
+- `CONFLICT` 与普通编辑器发现文件被外部进程修改含义相同：Core 阻止静默覆盖，重新加载、比较、合并或另存为由宿主决定。
 
 ```ts
 let document = await openMdv(path)
@@ -227,7 +229,7 @@ document = await document.saveDocument({
 
 Writer 在目标同目录创建 mode `0600` 的唯一临时 ZIP，逐条复制并校验历史内容，使用完整 Reader 验证新包，刷新临时文件后再发布。保存以同目录原子 replace 为 commit point；POSIX 本地文件系统随后同步父目录。commit point 前失败时旧包保持 byte-for-byte 不变；commit point 后若目录同步失败，错误 details 会包含 `committed: true` 和已发布的 generation，调用方必须重新 `openMdv` 确认状态。
 
-当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。save 拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在 M3 保持承诺内；POSIX mode 会在 save 时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，但正式 CI 矩阵留到发布收口阶段。
+当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。所有路径绑定写操作都拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，但正式 CI 矩阵留到发布收口阶段。
 
 Windows 使用可写句柄刷新临时文件，并依赖 Node 的同目录 rename/link 提供可见性；Node 没有可移植的 Windows 目录 fsync/write-through 接口，因此断电后的目录项持久性尚未达到 POSIX 路径的同等级保证，也尚未经过 Windows CI 实测。Windows 目标名末尾的点或空格会被拒绝，以免路径规范化产生第二把锁。
 
@@ -274,7 +276,7 @@ try {
 | `NOT_FOUND` | 文件路径或 Version ID 不存在 |
 | `LIMIT_EXCEEDED` | ZIP、JSON、版本数或自定义读取上限被超过 |
 | `IO_ERROR` | 其他文件系统读写、刷新、替换或清理失败 |
-| `CONFLICT` | generation/document/path 身份冲突、目标已存在或已被其他 writer 锁定 |
+| `CONFLICT` | generation/document/path 身份冲突、目标已存在、已被其他 writer 锁定，或 checkout 遇到 dirty 工作副本 |
 
 `details` 可能包含 entry、Version ID、I/O code、预期/实际 generation、`committed`、事务 stage 或清理状态，但不会包含完整 Markdown 正文。
 
@@ -294,10 +296,77 @@ try {
 
 这些数值限制之外，Reader 还会拒绝 ZIP64、多磁盘、加密条目、危险或冲突路径以及非普通 ZIP entry；完整容器约束以 [Format 0.1](../spec/format-0.1.md) 为准。
 
+## Commit 与 Checkout
+
+M4 在同一个 `MdvDocument` facade 上提供以下 API，相关类型均从 `@mdv/core` package root 导出：
+
+```ts
+interface CommitInput {
+  readonly expectedGeneration: number
+  readonly actor: Actor
+  readonly summary: string
+}
+
+interface CommitDocumentInput extends CommitInput {
+  readonly referenceVersion: VersionId | null
+}
+
+type CommitResult =
+  | {
+      readonly created: true
+      readonly version: VersionId
+      readonly document: MdvDocument
+    }
+  | {
+      readonly created: false
+      readonly reason: 'no-changes'
+      readonly document: MdvDocument
+    }
+
+interface CheckoutInput {
+  readonly version: VersionId
+  readonly expectedGeneration: number
+  readonly discardChanges?: boolean
+}
+
+interface MdvDocument {
+  commitReference(input: CommitInput): Promise<CommitResult>
+  commitDocument(input: CommitDocumentInput): Promise<CommitResult>
+  checkoutReference(input: CheckoutInput): Promise<MdvDocument>
+  checkoutDocument(input: CheckoutInput): Promise<MdvDocument>
+}
+```
+
+commit 示例：
+
+```ts
+const result = await document.commitDocument({
+  referenceVersion: null,
+  actor: { type: 'human', name: 'Hypnos' },
+  summary: 'Create the first version',
+  expectedGeneration: document.manifest.generation,
+})
+
+document = result.document
+if (result.created) {
+  console.log(result.version)
+}
+```
+
+行为契约：
+
+- commit 不接收 `markdown`，只固化已经通过 save 持久化的目标 `current.md`；宿主若还有未保存的内存 buffer，应先 save；
+- 第一次显式 commit 即使正文为空，也创建 parent 为 `null` 的根 Version；初始化本身仍不自动创建空版本；
+- 已有 Head 时，Reference 正文未变化，或 Document 正文与 bind 都未变化，返回 `created: false`；这次成功事务仍让 generation 精确增加 1；
+- Document 正文相同但显式 bind 改变时仍创建 Version；bind 只写入新 Document Version，不写工作副本；
+- checkout 默认检测 `current.md` 相对 Head 是否 dirty；dirty 时返回 `CONFLICT`，只有显式 `discardChanges: true` 才覆盖工作副本；
+- checkout 将历史正文复制到对应 `current.md` 并移动 Head，不创建 Version、不删除后代，成功时 generation 增加 1。
+
+`actor.type` 只接受 `human` 或 `agent`；可选 `actor.id`/`actor.name` 必须是长度不超过 256 的非空字符串；`summary` trim 后必须非空且最多 4096 个字符。`commitDocument.referenceVersion` 必须显式提供：`null` 表示不依赖 Reference，非空值必须是当前包中已存在的 Reference Version。不存在或属于错误树的 Version 选择返回 `NOT_FOUND`；dirty checkout 的 `MdvError.details` 包含 `reason: 'working-copy-dirty'` 和目标 tree。
+
 ## 当前未提供
 
-- `commitReference` / `commitDocument`；
-- checkout、dirty/drift、diff、verify、export；
+- 公开 dirty/drift、diff、verify、export；
 - 受管资源 import/resolve/read API；
 - Markdown parser、AST 或 renderer。
 

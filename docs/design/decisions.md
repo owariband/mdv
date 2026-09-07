@@ -23,17 +23,17 @@
 
 - 日期：2026-09-07
 - 状态：Accepted
-- 决定：save 只持久化工作副本；显式 commit 才创建不可变 Version。新建文档从零版本、零 Head 开始。
-- 理由：编辑器自动保存不应制造大量无意义历史。
-- 影响：generation 记录包变更次数，但不等同于版本数量。
+- 决定：`current.md` 沿用普通 Markdown 的可覆盖编辑语义；save 只持久化工作副本并执行 generation CAS，显式 commit 才创建不可变 Version。新建文档从零版本、零 Head 开始，不增加 `DraftVersion`、`workspace` 或 pending bind。
+- 理由：编辑器内存 buffer、撤销栈和冲突交互本来就由宿主管理，Core 不应为了版本能力复制普通 Markdown 已有的编辑模型；自动保存也不应制造大量无意义历史。
+- 影响：generation 记录包变更次数但不等同于版本数量；save 不移动 Head。多进程冲突由 Core 返回 `CONFLICT`，宿主决定重载、比较、合并或另存为。
 
 ## D004：Bind 只存于 Document Version
 
 - 日期：2026-09-07
 - 状态：Accepted
-- 决定：Document Version 保存精确 `referenceVersion` 或 `null`；Reference Version 不维护反向 bind。
+- 决定：Document Version 保存精确 `referenceVersion` 或 `null`；Reference Version 不维护反向 bind，工作副本也不保存 pending bind。
 - 理由：版本不可变，双向持久化会产生两份需要同步的事实来源。
-- 影响：Core 打开时构建可重建的 `documentsByReference` 反向索引。
+- 影响：Core 打开时构建可重建的 `documentsByReference` 反向索引；宿主在 commit 时显式提交 bind，尚未 commit 的选择只属于宿主上下文。
 
 ## D005：Core 返回 Markdown bytes/text，不返回 AST 或内部 path
 
@@ -67,3 +67,11 @@
 - 决定：public `interface` 描述真实调用契约；联合类型表达状态；泛型只保留实际类型关系。不为单一 ZIP 后端预建 Repository、Provider 或 Factory。
 - 理由：库需要明确的类型边界，但不需要没有第二实现的框架层。
 - 影响：树相关返回类型优先使用少量 overload；真正出现第二后端后再从现有 I/O seam 提取最小接口。
+
+## D009：M4 Commit 与 Checkout 边界
+
+- 日期：2026-09-07
+- 状态：Accepted
+- 决定：commit 不接收 Markdown，只固化已保存的 `current.md`；第一次显式空 commit 创建根 Version；已有 Head 后 no-changes 不创建 Version，但成功事务仍让 generation 增加 1。checkout 默认拒绝覆盖 dirty 工作副本，只有显式 `discardChanges: true` 才能替换 `current.md`。
+- 理由：版本操作必须建立在已经持久化、可进行 CAS 的工作副本上；显式 commit 表达用户保存版本的意图，而 checkout 不能静默丢弃已经保存的普通 Markdown。
+- 影响：宿主在 commit 前负责 save 内存 buffer；`CommitResult.created` 只说明是否创建 Version，不说明事务是否成功；宿主处理 dirty checkout 冲突时必须让用户选择先 commit 或明确丢弃。

@@ -1,4 +1,4 @@
-# MDV Core 技术机制与实现方案（Draft 0.5）
+# MDV Core 技术机制与实现方案（Draft 0.6）
 
 > 状态：项目结构与模型设计草案
 >
@@ -7,6 +7,8 @@
 > 产品语义与文件格式以 [`architecture.md`](./architecture.md) 为准；本文不重复定义另一套格式
 >
 > 文档属性：维护者设计，包含尚未落地的机制；当前可用接口见 [`api-reference.md`](../api-reference.md)
+>
+> 实现进度：M4 已完成；save、commit 和 checkout 已从 package root 提供，并复用同一文件事务。
 
 ## 1. 已确定的技术结论
 
@@ -22,6 +24,7 @@
 10. Core 不依赖 CLI，也不定义 argv、JSON envelope 或退出码；它只提供足够稳定的 public API 供 CLI、VS Code、MarkText 和其他宿主调用。
 11. 外部受管资源属于 Core 的文件语义：Core 负责内容寻址、相对路径解析、读取、写入和哈希校验；宿主负责 paste/drop、Markdown 插入与渲染。
 12. Public `interface` 只描述调用方实际消费的对象契约；泛型只在能保留真实类型关系或复用同一校验逻辑时使用，不把“库”设计成多层通用框架。
+13. 普通编辑沿用 Markdown 的既有模型：宿主拥有内存 buffer，Core 只持久化 `current.md`。不引入 `DraftVersion`、`workspace`、pending bind 或另一套草稿状态机。
 
 ## 2. 责任边界
 
@@ -41,6 +44,7 @@
 - Markdown token、AST、编辑器 State 或 HTML 的生成；
 - GFM、数学公式、Mermaid 等具体语法的解释；
 - Electron/Vue UI、自动保存时机、Agent 任务调度和审批发布流程；
+- 编辑器内存 buffer、撤销栈、光标状态，以及冲突后的 UI 重载、比较或合并决策；
 - 把不同 Markdown 解析器的模型统一成一种“万能 AST”；
 - 扫描或改写 Markdown 中的任意链接、下载网络资源、处理宿主 paste/drop、渲染图片；
 - 自动删除受管资源，或保证未随 `.mdv` 一同移动的 sidecar 仍然可用。
@@ -520,14 +524,34 @@ interface SaveInput {
   readonly expectedGeneration: number
 }
 
+interface CommitInput {
+  readonly expectedGeneration: number
+  readonly actor: Actor
+  readonly summary: string
+}
+
 interface CommitDocumentInput extends CommitInput {
   readonly referenceVersion: VersionId | null
+}
+
+type CommitResult =
+  | { readonly created: true; readonly version: VersionId; readonly document: MdvDocument }
+  | { readonly created: false; readonly reason: 'no-changes'; readonly document: MdvDocument }
+
+interface CheckoutInput {
+  readonly version: VersionId
+  readonly expectedGeneration: number
+  readonly discardChanges?: boolean
 }
 ```
 
 `referenceVersion` 必须显式传值。`null` 表示无摘要依赖，不能把“未传”偷偷解释成当前 `ref_tree/HEAD`，否则并发更新摘要时会生成调用方没有明确选择的 bind。
 
-save 和 checkout 成功后直接返回新的路径绑定 `MdvDocument`，新的 generation 位于 `result.manifest.generation`；不增加只把 generation 与 snapshot 再包装一次的结果对象。调用方后续写入必须使用返回对象，而不能继续沿用旧快照。commit 是否需要额外返回新建 Version ID 和 `created` 状态，由 M4 的 `CommitResult` 单独表达。
+save 和 checkout 成功后直接返回新的路径绑定 `MdvDocument`，新的 generation 位于 `result.manifest.generation`；不增加只把 generation 与 snapshot 再包装一次的结果对象。调用方后续写入必须使用返回对象，而不能继续沿用旧快照。commit 使用判别联合 `CommitResult`：创建版本时返回 Version ID；no-changes 时返回稳定 reason。两种结果都携带新 `MdvDocument`。
+
+commit 不接收 `markdown`，只固化已经 save 到目标 `current.md` 的原始字节。这样宿主内存 buffer、普通 Markdown 工作副本和不可变 Version 不会混成一层。没有 Head 时，第一次显式 commit 即使正文为空也创建根 Version；已有 Head 后正文（以及 Document bind）都未变化时不创建 Version，但成功事务仍让 generation 增加 1。
+
+checkout 默认在锁内检查目标 `current.md` 相对 Head 是否 dirty。dirty 时返回 `CONFLICT`；只有 `discardChanges: true` 才允许历史正文覆盖已经保存的工作副本。成功 checkout 不创建 Version，但移动对应 Head 并让 generation 增加 1。
 
 `expectedGeneration` 是非负安全整数。public facade 先拒绝无效参数，但真实的 CAS 比较必须在 archive 取得锁并重开最新包之后执行；不匹配时返回 `CONFLICT`，不能先写临时提交再判断。
 
@@ -584,6 +608,8 @@ public API command
 
 这样可以避免两个 writer 都基于旧 Head 生成看似合法、实际覆盖对方的包。Core 可以调用一个具体的 `runPackageTransaction` 函数并传入变换回调；当前不需要抽象通用 Repository。
 
+对普通 save 而言，这个冲突模型和编辑 Markdown 文件时发现外部修改一致：Core 只负责返回 `CONFLICT`、保持磁盘内容不被静默覆盖；宿主负责重载、比较、合并或另存为，不把这些交互策略塞进格式库。
+
 ## 8. Archive 与本地文件事务
 
 ### 8.1 Reader
@@ -611,7 +637,7 @@ Reader 在读取正文前已经拒绝绝对路径、`..`、反斜杠、重复/�
 
 ### 8.2 Writer 与事务
 
-M3 已为 create 和两种 working-copy save 实现整包事务；M4 的 commit/checkout 必须复用该事务边界：
+M3 为 create 和两种 working-copy save 实现了整包事务；M4 commit/checkout 已复用该事务边界：
 
 1. 解析文件系统最终路径，并获取相邻 `<target>.lock` 目录锁；
 2. 在锁内重新打开原包；
@@ -629,7 +655,7 @@ Writer 使用稳定的 UTF-8 entry-name byte order、STORE、固定 DOS 时间�
 
 commit point 之前的错误必须保持旧目标 byte-for-byte 不变，并尽力清理本次临时文件和锁。清理自身失败时通过 `cleanupIncomplete` 与 `cleanupFailures` 上报。commit point 之后如果目录同步失败，目标可能已经是新 generation；公开 `IO_ERROR.details` 必须包含 `stage: 'sync-directory'`、`committed: true` 和 generation，调用方随后重新 `openMdv` 判断结果，不能用旧 generation 自动重试。
 
-文件事务只对实现明确支持的本地文件系统承诺跨进程互斥、CAS 和同目录原子替换。save 拒绝最终 symlink、hard-link alias 和其他非普通文件目标；网络文件系统、FUSE、同步盘或破坏锁/原子替换语义的挂载不在同等级保证范围内。`createMdv` 同样不会跟随一个已存在的 symlink 并覆盖其指向目标。
+文件事务只对实现明确支持的本地文件系统承诺跨进程互斥、CAS 和同目录原子替换。所有路径绑定写操作都拒绝最终 symlink、hard-link alias 和其他非普通文件目标；网络文件系统、FUSE、同步盘或破坏锁/原子替换语义的挂载不在同等级保证范围内。`createMdv` 同样不会跟随一个已存在的 symlink 并覆盖其指向目标。
 
 已有锁永不按时间自动回收，以免把缓慢但仍活跃的 writer 误判为 stale。进程崩溃后，维护者必须先确认没有活跃 writer，再人工删除 `<target>.lock` 和遗留的 `.mdv-*.tmp`。这是保守恢复契约，不是自动 crash recovery。
 
@@ -668,6 +694,8 @@ document = await document.saveDocument({
 
 generation = document.manifest.generation
 ```
+
+这里的 editor state 不是 Core model。宿主可以像编辑普通 `.md` 一样维护内存 buffer、撤销栈和 dirty UI；只有调用 `saveDocument` 时才把当前 Markdown 交给 Core。generation 冲突时宿主执行普通的“文件已被外部修改”流程，Core 不自动合并或覆盖。
 
 adapter 另外负责：
 
@@ -750,7 +778,7 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 4. 实现 Core hydrate、invariants、索引与 trace 查询。
 5. 接出只读 public API 和 bytes/text 内容接口。
 6. 实现 M3 transaction、create/save 和冲突测试。
-7. 实现 M4 commit/checkout，并复用 M3 事务路径。
+7. 已实现 M4 commit/checkout，并复用 M3 事务路径。
 8. 实现 M5 源文本 Diff、漂移、verify/export，再完成内容寻址外部资源闭环。
 9. 完成 Core 的发布与兼容性验收后再启动 VS Code extension。
 

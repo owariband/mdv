@@ -13,7 +13,7 @@
 - 恢复边界：锁永不按时间自动回收。异常退出后，只有在确认没有活跃 writer 时才人工删除 `<target>.lock` 与遗留的 `.mdv-*.tmp`；清理失败由结构化错误显式上报。
 - 元数据边界：save 保留 POSIX mode，不承诺 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。
 - 平台结论：macOS 本地文件系统已实测文件与目录同步；Windows 会刷新临时文件，但目录项 crash durability 弱于 POSIX，且尚未通过 Windows CI。因此 M3 不宣称两者具有同等级的断电持久性。
-- 验证：61 项测试在 Node 20.19.5 实跑通过，覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、写 ZIP、临时包全验、fsync、replace、目录同步故障注入、真实跨进程竞争、路径身份、清理失败与权限边界；独立 tarball consumer smoke 验证 package-root 安装和 create/save/open。
+- 验证：测试在 Node 20.19.5 实跑通过，覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、写 ZIP、临时包全验、fsync、replace、目录同步故障注入、真实跨进程竞争、路径身份、清理失败与权限边界；独立 tarball consumer smoke 验证 package-root 安装和 create/save/open。滚动测试总数以 `npm test` 输出为准。
 
 ## O002：受管资源的媒体类型与扩展名策略
 

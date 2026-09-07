@@ -2,7 +2,7 @@
 
 这里是 `@mdv/core` 调用方文档，只描述当前代码已经提供的能力。未来设计、尚未实现的 API 和开发排期统一放在[维护者设计区](./design/index.md)，避免设计草案被误认为可用功能。
 
-> 当前实现阶段：M3 创建、读取与工作副本保存 API。可以创建、打开、读取、trace 和 save `.mdv`；不能 commit 或 checkout。
+> 当前实现阶段：M4 已完成。当前 package export 可以创建、打开、读取、trace、save、commit 和 checkout `.mdv`；Review、公开 dirty/drift、diff、verify 与 export 仍属于后续阶段。
 
 ## 从哪里开始
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | 构建项目并完成第一次读取 | [快速开始](./getting-started.md) |
 | 理解双工作副本、版本和 bind | [核心概念](./concepts.md) |
-| 查询、保存、类型与错误码 | [M3 API 参考](./api-reference.md) |
+| 查询、保存、类型与错误码 | [当前 API 参考](./api-reference.md) |
 | 正确处理图片和相对路径 | [图片与相对资源](./resources.md) |
 | 实现其他语言的兼容 Reader/Writer | [Container Format 0.1](../spec/format-0.1.md) |
 | 参与 Core 设计和后续开发 | [维护者设计索引](./design/index.md) |
@@ -27,7 +27,8 @@
 | 创建 generation 0 的空 MDV | 可用 |
 | 保存 Reference / Document 工作副本 | 可用；generation CAS，不创建版本 |
 | Markdown AST、HTML 和渲染 | 不属于 Core |
-| commit、checkout | 尚未实现 |
+| commit Reference / Document Version | 可用；只固化已保存的 `current.md` |
+| checkout Reference / Document Version | 可用；dirty 工作副本默认受保护 |
 | 受管资源导入与校验 API | 尚未实现 |
 | npm 正式发布与稳定兼容承诺 | 尚未完成 |
 

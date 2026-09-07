@@ -3,7 +3,12 @@ import { dirname, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 
 import { ArchiveError } from './archive/errors.js'
-import type { ManifestFileDto } from './archive/format-dto.js'
+import type {
+  ActorFileDto,
+  DocumentVersionMetaFileDto,
+  ManifestFileDto,
+  VersionMetaFileDto,
+} from './archive/format-dto.js'
 import { canonicalizeTargetPath } from './archive/lock.js'
 import { resolveReadLimits } from './archive/limits.js'
 import {
@@ -14,7 +19,22 @@ import {
 import type { OpenedArchive } from './archive/reader.js'
 import { compareRfc3339 } from './archive/rfc3339.js'
 import { runArchiveTransaction } from './archive/transaction.js'
+import {
+  planCheckout,
+  planDocumentCommit,
+  planReferenceCommit,
+  VersionIdCollisionError,
+  VersionSelectionError,
+  WorkingCopyDirtyError,
+} from './core/commands.js'
+import type {
+  AppendDocumentCommitPlan,
+  AppendReferenceCommitPlan,
+  DocumentCommitPlan,
+  ReferenceCommitPlan,
+} from './core/commands.js'
 import { hydrateArchiveIndex } from './core/hydrate.js'
+import { brandVersionId } from './core/ids.js'
 import type { VersionId as CoreVersionId } from './core/ids.js'
 import { GraphValidationError } from './core/invariants.js'
 import type {
@@ -31,6 +51,10 @@ import {
 import { MdvError } from './errors.js'
 import type {
   Actor,
+  CheckoutInput,
+  CommitDocumentInput,
+  CommitInput,
+  CommitResult,
   CreateOptions,
   DocumentId,
   DocumentSnapshot,
@@ -52,6 +76,7 @@ import type {
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const MARKDOWN_PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+const VERSION_ID = /^v_[0-9a-f]{32}$/
 
 export async function parseMdv(
   bytes: Uint8Array,
@@ -425,6 +450,50 @@ class FileMdvDocument extends ReadonlyDocumentSnapshot<string> implements MdvDoc
       this.#openOptions,
     )
   }
+
+  async commitReference(input: CommitInput): Promise<CommitResult> {
+    return commitWorkingCopy(
+      this.packagePath,
+      this.#targetPath,
+      this.manifest.documentId,
+      'reference',
+      input,
+      this.#openOptions,
+    )
+  }
+
+  async commitDocument(input: CommitDocumentInput): Promise<CommitResult> {
+    return commitWorkingCopy(
+      this.packagePath,
+      this.#targetPath,
+      this.manifest.documentId,
+      'document',
+      input,
+      this.#openOptions,
+    )
+  }
+
+  async checkoutReference(input: CheckoutInput): Promise<MdvDocument> {
+    return checkoutVersion(
+      this.packagePath,
+      this.#targetPath,
+      this.manifest.documentId,
+      'reference',
+      input,
+      this.#openOptions,
+    )
+  }
+
+  async checkoutDocument(input: CheckoutInput): Promise<MdvDocument> {
+    return checkoutVersion(
+      this.packagePath,
+      this.#targetPath,
+      this.manifest.documentId,
+      'document',
+      input,
+      this.#openOptions,
+    )
+  }
 }
 
 async function saveWorkingCopy(
@@ -436,6 +505,7 @@ async function saveWorkingCopy(
   options: OpenOptions,
 ): Promise<MdvDocument> {
   validateSaveInput(input)
+  const expectedGeneration = input.expectedGeneration
   const maxEntryBytes = resolveReadLimits(options.limits).maxEntryBytes
   const markdownBytes = typeof input.markdown === 'string'
     ? Buffer.byteLength(input.markdown, 'utf8')
@@ -456,6 +526,270 @@ async function saveWorkingCopy(
     throw toMdvError(cause, `Invalid ${tree} Markdown`)
   }
 
+  await requireBoundTarget(packagePath, targetPath)
+
+  let committedGeneration: number | undefined
+  try {
+    const result = await runArchiveTransaction(
+      targetPath,
+      {
+        type: 'save-working-copy',
+        tree,
+        markdown,
+        expectedDocumentId,
+        expectedGeneration,
+      },
+      {
+        ...(options.limits === undefined ? {} : { limits: options.limits }),
+        validate: validateArchiveGraph,
+      },
+    )
+    committedGeneration = result.archive.manifest.generation
+    return createFileDocument(result.archive, packagePath, result.targetPath, options)
+  } catch (cause) {
+    if (committedGeneration !== undefined) {
+      throw committedResultError(cause, packagePath, committedGeneration)
+    }
+    throw toMdvError(cause, `Failed to save ${tree} working copy`)
+  }
+}
+
+type CommitTransactionValue =
+  | { readonly created: true; readonly version: VersionId }
+  | { readonly created: false }
+
+async function commitWorkingCopy(
+  packagePath: string,
+  targetPath: string,
+  expectedDocumentId: DocumentId,
+  tree: TreeKind,
+  input: CommitInput | CommitDocumentInput,
+  options: OpenOptions,
+): Promise<CommitResult> {
+  validateCommitInput(input, tree)
+  const commitInput = snapshotCommitInput(input, tree)
+  await requireBoundTarget(packagePath, targetPath)
+
+  let committedGeneration: number | undefined
+  try {
+    const result = await runArchiveTransaction<CommitTransactionValue>(
+      targetPath,
+      {
+        type: 'planned-mutation',
+        expectedDocumentId,
+        expectedGeneration: commitInput.expectedGeneration,
+        prepare: async (source) => {
+          const state = hydrateOpenedArchive(source)
+          const workingCopy = await source.readWorkingCopy(tree)
+          const createdAt = new Date().toISOString()
+          let plan: ReferenceCommitPlan | DocumentCommitPlan | undefined
+
+          for (let attempt = 0; attempt < 8; attempt += 1) {
+            const versionId = brandVersionId(`v_${randomBytes(16).toString('hex')}`)
+            try {
+              plan = tree === 'reference'
+                ? planReferenceCommit({
+                    state,
+                    workingCopy,
+                    actor: commitInput.actor,
+                    summary: commitInput.summary,
+                    versionId,
+                    createdAt,
+                  })
+                : planDocumentCommit({
+                    state,
+                    workingCopy,
+                    actor: commitInput.actor,
+                    summary: commitInput.summary,
+                    versionId,
+                    createdAt,
+                    referenceVersion: toNullableCoreVersionId(
+                      commitInput.referenceVersion,
+                    ),
+                  })
+              break
+            } catch (cause) {
+              if (cause instanceof VersionIdCollisionError) {
+                continue
+              }
+              throw mapCommandError(cause)
+            }
+          }
+
+          if (plan === undefined) {
+            throw new ArchiveError('CONFLICT', 'Could not allocate a unique Version ID', {
+              details: { reason: 'version-id-collision' },
+            })
+          }
+          if (plan.kind === 'no-changes') {
+            return Object.freeze({
+              mutation: Object.freeze({ type: 'preserve-state' as const }),
+              value: Object.freeze({ created: false as const }),
+            })
+          }
+
+          return plan.tree === 'reference'
+            ? preparedReferenceCommit(plan)
+            : preparedDocumentCommit(plan)
+        },
+      },
+      {
+        ...(options.limits === undefined ? {} : { limits: options.limits }),
+        validate: validateArchiveGraph,
+      },
+    )
+    committedGeneration = result.archive.manifest.generation
+    const document = createFileDocument(result.archive, packagePath, result.targetPath, options)
+    return result.value.created
+      ? Object.freeze({
+          created: true,
+          version: result.value.version,
+          document,
+        })
+      : Object.freeze({
+          created: false,
+          reason: 'no-changes',
+          document,
+        })
+  } catch (cause) {
+    if (committedGeneration !== undefined) {
+      throw committedResultError(cause, packagePath, committedGeneration)
+    }
+    throw toMdvError(cause, `Failed to commit ${tree} working copy`)
+  }
+}
+
+async function checkoutVersion(
+  packagePath: string,
+  targetPath: string,
+  expectedDocumentId: DocumentId,
+  tree: TreeKind,
+  input: CheckoutInput,
+  options: OpenOptions,
+): Promise<MdvDocument> {
+  validateCheckoutInput(input)
+  const checkoutInput = snapshotCheckoutInput(input)
+  await requireBoundTarget(packagePath, targetPath)
+
+  let committedGeneration: number | undefined
+  try {
+    const result = await runArchiveTransaction(
+      targetPath,
+      {
+        type: 'planned-mutation',
+        expectedDocumentId,
+        expectedGeneration: checkoutInput.expectedGeneration,
+        prepare: async (source) => {
+          let plan
+          try {
+            plan = planCheckout({
+              state: hydrateOpenedArchive(source),
+              tree,
+              version: toCoreVersionId(checkoutInput.version),
+              workingCopy: await source.readWorkingCopy(tree),
+              ...(checkoutInput.discardChanges === undefined
+                ? {}
+                : { discardChanges: checkoutInput.discardChanges }),
+            })
+          } catch (cause) {
+            throw mapCommandError(cause)
+          }
+          return Object.freeze({
+            mutation: Object.freeze({
+              type: 'checkout' as const,
+              tree: plan.tree,
+              versionId: plan.version,
+            }),
+            value: plan.discardedChanges,
+          })
+        },
+      },
+      {
+        ...(options.limits === undefined ? {} : { limits: options.limits }),
+        validate: validateArchiveGraph,
+      },
+    )
+    committedGeneration = result.archive.manifest.generation
+    return createFileDocument(result.archive, packagePath, result.targetPath, options)
+  } catch (cause) {
+    if (committedGeneration !== undefined) {
+      throw committedResultError(cause, packagePath, committedGeneration)
+    }
+    throw toMdvError(mapCommandError(cause), `Failed to checkout ${tree} version`)
+  }
+}
+
+function preparedReferenceCommit(plan: AppendReferenceCommitPlan): {
+  readonly mutation: {
+    readonly type: 'append-reference-version'
+    readonly metadata: VersionMetaFileDto
+    readonly content: Uint8Array
+  }
+  readonly value: CommitTransactionValue
+} {
+  return Object.freeze({
+    mutation: Object.freeze({
+      type: 'append-reference-version' as const,
+      metadata: toReferenceVersionMetadata(plan),
+      content: plan.content,
+    }),
+    value: Object.freeze({ created: true as const, version: plan.version.id as VersionId }),
+  })
+}
+
+function preparedDocumentCommit(plan: AppendDocumentCommitPlan): {
+  readonly mutation: {
+    readonly type: 'append-document-version'
+    readonly metadata: DocumentVersionMetaFileDto
+    readonly content: Uint8Array
+  }
+  readonly value: CommitTransactionValue
+} {
+  return Object.freeze({
+    mutation: Object.freeze({
+      type: 'append-document-version' as const,
+      metadata: toDocumentVersionMetadata(plan),
+      content: plan.content,
+    }),
+    value: Object.freeze({ created: true as const, version: plan.version.id as VersionId }),
+  })
+}
+
+function toReferenceVersionMetadata(plan: AppendReferenceCommitPlan): VersionMetaFileDto {
+  return toVersionMetadata(plan.version)
+}
+
+function toVersionMetadata(
+  version: CoreReferenceVersion | CoreDocumentVersion,
+): VersionMetaFileDto {
+  return Object.freeze({
+    schemaVersion: 1,
+    id: version.id,
+    parent: version.parent,
+    createdAt: version.createdAt,
+    actor: toActorFileDto(version.actor),
+    summary: version.summary,
+    contentSha256: version.contentSha256,
+    contentBytes: version.contentBytes,
+  })
+}
+
+function toDocumentVersionMetadata(plan: AppendDocumentCommitPlan): DocumentVersionMetaFileDto {
+  return Object.freeze({
+    ...toVersionMetadata(plan.version),
+    referenceVersion: plan.version.referenceVersion,
+  })
+}
+
+function toActorFileDto(actor: Actor): ActorFileDto {
+  return Object.freeze({
+    type: actor.type,
+    ...(actor.id === undefined ? {} : { id: actor.id }),
+    ...(actor.name === undefined ? {} : { name: actor.name }),
+  })
+}
+
+async function requireBoundTarget(packagePath: string, targetPath: string): Promise<void> {
   let currentTargetPath: string
   try {
     currentTargetPath = await canonicalizeTargetPath(packagePath)
@@ -470,31 +804,6 @@ async function saveWorkingCopy(
         actualTargetPath: currentTargetPath,
       },
     })
-  }
-
-  let committedGeneration: number | undefined
-  try {
-    const result = await runArchiveTransaction(
-      targetPath,
-      {
-        type: 'save-working-copy',
-        tree,
-        markdown,
-        expectedDocumentId,
-        expectedGeneration: input.expectedGeneration,
-      },
-      {
-        ...(options.limits === undefined ? {} : { limits: options.limits }),
-        validate: validateArchiveGraph,
-      },
-    )
-    committedGeneration = result.archive.manifest.generation
-    return createFileDocument(result.archive, packagePath, result.targetPath, options)
-  } catch (cause) {
-    if (committedGeneration !== undefined) {
-      throw committedResultError(cause, packagePath, committedGeneration)
-    }
-    throw toMdvError(cause, `Failed to save ${tree} working copy`)
   }
 }
 
@@ -532,12 +841,133 @@ function validateSaveInput(input: SaveInput): void {
   if (input === null || typeof input !== 'object') {
     throw new TypeError('Save input must be an object')
   }
-  if (!Number.isSafeInteger(input.expectedGeneration) || input.expectedGeneration < 0) {
-    throw new RangeError('expectedGeneration must be a non-negative safe integer')
-  }
+  validateExpectedGeneration(input.expectedGeneration)
   if (typeof input.markdown !== 'string' && !(input.markdown instanceof Uint8Array)) {
     throw new TypeError('markdown must be a string or Uint8Array')
   }
+}
+
+function validateCommitInput(
+  input: CommitInput | CommitDocumentInput,
+  tree: TreeKind,
+): void {
+  if (input === null || typeof input !== 'object') {
+    throw new TypeError('Commit input must be an object')
+  }
+  validateExpectedGeneration(input.expectedGeneration)
+  validateActor(input.actor)
+  if (
+    typeof input.summary !== 'string'
+    || input.summary.trim().length === 0
+    || input.summary.length > 4096
+  ) {
+    throw new TypeError('summary must be a non-blank string up to 4096 characters')
+  }
+  if (tree === 'document') {
+    const referenceVersion = (input as CommitDocumentInput).referenceVersion
+    if (referenceVersion !== null && !isVersionId(referenceVersion)) {
+      throw new TypeError('referenceVersion must be a valid Version ID or null')
+    }
+  }
+}
+
+interface CommitInputSnapshot {
+  readonly expectedGeneration: number
+  readonly actor: Actor
+  readonly summary: string
+  readonly referenceVersion: VersionId | null
+}
+
+function snapshotCommitInput(
+  input: CommitInput | CommitDocumentInput,
+  tree: TreeKind,
+): CommitInputSnapshot {
+  return Object.freeze({
+    expectedGeneration: input.expectedGeneration,
+    actor: Object.freeze({
+      type: input.actor.type,
+      ...(input.actor.id === undefined ? {} : { id: input.actor.id }),
+      ...(input.actor.name === undefined ? {} : { name: input.actor.name }),
+    }),
+    summary: input.summary,
+    referenceVersion: tree === 'document'
+      ? (input as CommitDocumentInput).referenceVersion
+      : null,
+  })
+}
+
+function validateCheckoutInput(input: CheckoutInput): void {
+  if (input === null || typeof input !== 'object') {
+    throw new TypeError('Checkout input must be an object')
+  }
+  validateExpectedGeneration(input.expectedGeneration)
+  if (!isVersionId(input.version)) {
+    throw new TypeError('version must be a valid Version ID')
+  }
+  if (input.discardChanges !== undefined && typeof input.discardChanges !== 'boolean') {
+    throw new TypeError('discardChanges must be a boolean when provided')
+  }
+}
+
+function snapshotCheckoutInput(input: CheckoutInput): CheckoutInput {
+  return Object.freeze({
+    version: input.version,
+    expectedGeneration: input.expectedGeneration,
+    ...(input.discardChanges === undefined ? {} : { discardChanges: input.discardChanges }),
+  })
+}
+
+function validateExpectedGeneration(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError('expectedGeneration must be a non-negative safe integer')
+  }
+}
+
+function validateActor(actor: Actor): void {
+  if (actor === null || typeof actor !== 'object') {
+    throw new TypeError('actor must be an object')
+  }
+  if (actor.type !== 'human' && actor.type !== 'agent') {
+    throw new TypeError('actor.type must equal "human" or "agent"')
+  }
+  for (const [name, value] of [['id', actor.id], ['name', actor.name]] as const) {
+    if (
+      value !== undefined
+      && (typeof value !== 'string' || value.length === 0 || value.length > 256)
+    ) {
+      throw new TypeError(`actor.${name} must be a non-empty string up to 256 characters`)
+    }
+  }
+}
+
+function isVersionId(value: unknown): value is VersionId {
+  return typeof value === 'string' && VERSION_ID.test(value)
+}
+
+function mapCommandError(cause: unknown): unknown {
+  if (cause instanceof VersionSelectionError) {
+    return new ArchiveError('NOT_FOUND', cause.message, {
+      details: {
+        reason: cause.reason,
+        tree: cause.tree,
+        versionId: cause.version,
+      },
+      cause,
+    })
+  }
+  if (cause instanceof WorkingCopyDirtyError) {
+    return new ArchiveError('CONFLICT', cause.message, {
+      details: { reason: cause.reason, tree: cause.tree },
+      cause,
+    })
+  }
+  if (cause instanceof VersionIdCollisionError) {
+    return new ArchiveError('CONFLICT', cause.message, {
+      details: { reason: cause.reason, versionId: cause.version },
+      cause,
+    })
+  }
+  return cause
 }
 
 function committedResultError(
@@ -597,6 +1027,10 @@ function sortVersions<T extends VersionSummary>(versions: Iterable<T>): readonly
 
 function toCoreVersionId(id: VersionId): CoreVersionId {
   return id as unknown as CoreVersionId
+}
+
+function toNullableCoreVersionId(id: VersionId | null): CoreVersionId | null {
+  return id === null ? null : toCoreVersionId(id)
 }
 
 function toPublicVersionId(id: CoreVersionId | null): VersionId | null {

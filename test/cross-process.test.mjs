@@ -21,9 +21,9 @@ const WORKER_SOURCE = String.raw`
 const [moduleUrl, serializedCommand] = process.argv.slice(2)
 const command = JSON.parse(serializedCommand)
 const { createMdv, openMdv } = await import(moduleUrl)
-const opened = command.action === 'save-document'
-  ? await openMdv(command.path)
-  : null
+  const opened = command.action === 'create'
+    ? null
+    : await openMdv(command.path)
 
 process.send({ type: 'ready' })
 process.once('message', async (message) => {
@@ -34,16 +34,30 @@ process.once('message', async (message) => {
   }
 
   try {
-    const document = command.action === 'create'
-      ? await createMdv(command.path)
-      : await opened.saveDocument({
-          markdown: command.markdown,
-          expectedGeneration: command.expectedGeneration,
-        })
+    let document
+    let version
+    if (command.action === 'create') {
+      document = await createMdv(command.path)
+    } else if (command.action === 'save-document') {
+      document = await opened.saveDocument({
+        markdown: command.markdown,
+        expectedGeneration: command.expectedGeneration,
+      })
+    } else {
+      const commit = await opened.commitDocument({
+        expectedGeneration: command.expectedGeneration,
+        referenceVersion: null,
+        actor: { type: 'agent', id: command.actorId },
+        summary: command.summary,
+      })
+      document = commit.document
+      version = commit.created ? commit.version : null
+    }
     finish({
       type: 'result',
       ok: true,
       generation: document.manifest.generation,
+      ...(version === undefined ? {} : { version }),
     })
   } catch (error) {
     finish({
@@ -116,6 +130,49 @@ test('two processes saving one generation commit exactly one working copy', {
 
   await unlink(workerPath)
   assert.deepEqual(await readdir(directory), ['save-race.mdv'])
+})
+
+test('two processes committing one generation create exactly one Document Version', {
+  timeout: 20_000,
+}, async (t) => {
+  const directory = await temporaryDirectory(t)
+  const packagePath = join(directory, 'commit-race.mdv')
+  const workerPath = await writeWorker(directory)
+
+  await runSingleCreate(workerPath, packagePath)
+  const [saved] = await runContenders(workerPath, [{
+    action: 'save-document',
+    path: packagePath,
+    expectedGeneration: 0,
+    markdown: '# concurrent commit\n',
+  }])
+  assert.deepEqual(saved, { type: 'result', ok: true, generation: 1 })
+
+  const results = await runContenders(workerPath, [
+    {
+      action: 'commit-document',
+      path: packagePath,
+      expectedGeneration: 1,
+      actorId: 'process-one',
+      summary: 'Commit from process one',
+    },
+    {
+      action: 'commit-document',
+      path: packagePath,
+      expectedGeneration: 1,
+      actorId: 'process-two',
+      summary: 'Commit from process two',
+    },
+  ])
+  assertOneWinnerAndOneConflict(results, 2)
+
+  const reopened = await openMdv(packagePath)
+  assert.equal(reopened.manifest.generation, 2)
+  assert.equal(reopened.listVersions({ tree: 'document' }).length, 1)
+  assert.equal(await reopened.readDocumentText(), '# concurrent commit\n')
+
+  await unlink(workerPath)
+  assert.deepEqual(await readdir(directory), ['commit-race.mdv'])
 })
 
 async function runSingleCreate(workerPath, packagePath) {

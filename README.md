@@ -6,11 +6,12 @@
 
 MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@mdv/core` 是它的 TypeScript 参考实现。
 
-> 当前状态：开发预览。M3 创建、读取与工作副本保存 API 已完成；commit、checkout 和正式 npm 发布尚未完成。
+> 当前状态：开发预览。M4 已完成：当前 package root 已支持创建、读取、工作副本保存、commit、checkout 和历史 trace；正式 npm 发布尚未完成。
 
 ## 为什么使用 MDV
 
 - Reference 与 Document 各自拥有工作副本和版本历史。
+- 不做版本操作时，`current.md` 就是一份普通、可覆盖保存的 Markdown；编辑器内存状态仍由宿主管理。
 - 普通保存与 commit 分离，只有显式 commit 才固化版本。
 - 每个 Document Version 精确绑定一个 Reference Version，或明确绑定 `null`。
 - Markdown 原始字节保持不变，渲染继续交给 VS Code、MarkText、remark 等上层工具。
@@ -27,6 +28,14 @@ document = await document.saveDocument({
   expectedGeneration: document.manifest.generation,
 })
 
+const committed = await document.commitDocument({
+  referenceVersion: null,
+  actor: { type: 'human', name: 'Hypnos' },
+  summary: 'Create the first Document version',
+  expectedGeneration: document.manifest.generation,
+})
+document = committed.document
+
 const reopened = await openMdv('/documents/example.mdv')
 console.log(await reopened.readDocumentText())
 
@@ -36,7 +45,9 @@ if (reopened.documentTree.head !== null) {
 }
 ```
 
-M3 已支持创建空 MDV、从文件或内存打开、保存两份工作副本、读取历史正文、查询两棵版本树并追踪 bind。普通 save 只更新工作副本并递增 generation，不创建 Version；显式 commit 仍属于下一阶段。
+当前已支持创建空 MDV、从文件或内存打开、保存两份工作副本、显式提交不可变版本、checkout 历史版本、读取历史正文、查询两棵版本树并追踪 bind。普通 save 只更新目标 `current.md` 并递增 generation，不创建 Version、也不移动 HEAD。多个进程同时编辑时，Core 通过 generation CAS 报告 `CONFLICT`，由 VS Code、MarkText 或其他宿主决定重载、比较或合并，就像处理普通 Markdown 被外部修改一样。
+
+M4 沿用普通 Markdown 编辑底座，没有引入 `DraftVersion`、`workspace` 或 pending bind。commit 只固化已经 save 的 `current.md`；Document bind 只属于 commit 后的不可变 Document Version。checkout 默认拒绝覆盖 dirty 工作副本，只有显式 `discardChanges: true` 才允许丢弃它。
 
 ## 从源码使用
 
@@ -65,7 +76,7 @@ npm install /absolute/path/to/mdv
 - [官方使用文档](docs/README.md)
 - [快速开始](docs/getting-started.md)
 - [核心概念](docs/concepts.md)
-- [M3 API 参考](docs/api-reference.md)
+- [当前 API 参考](docs/api-reference.md)
 - [图片与相对资源](docs/resources.md)
 - [MDV Container Format 0.1](spec/format-0.1.md)
 - [维护者设计资料](docs/design/index.md)

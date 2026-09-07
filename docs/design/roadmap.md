@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-07
 >
-> 当前里程碑：M3「创建、保存与文件事务」已完成；下一步为 M4「Commit 与 Checkout」
+> 当前里程碑：M4「Commit 与 Checkout」已完成；下一步为 M5「Review、状态与完整性能力」
 >
 > 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件
 >
@@ -40,8 +40,8 @@
 | M1 内部只读基础 | 完成 | ZIP Reader、严格 JSON/UTF-8、hydrate、版本图校验和基础索引查询 | 后续在 M6 扩充安全与 fuzz 矩阵 |
 | M2 公开只读 API | 完成 | package root 的 open/parse、只读 facade、查询、trace、bytes/text 和稳定错误映射 | 写能力留在 M3，状态与完整性能力留在 M5 |
 | M3 创建、保存与文件事务 | 完成 | create/save、确定性 ZIP Writer、锁内双重 CAS、临时包全验、fsync 与原子替换 | Windows 目录项 crash durability 尚未达到 POSIX 同等级保证 |
-| M4 Commit 与 Checkout | 未开始 | commit/bind/branch 规则已有设计 | Core commands 和持久化 mutation 尚未实现 |
-| M5 Review 与完整性能力 | 未开始 | Diff、drift、verify、export 契约已有设计 | 实现与覆盖测试尚未开始 |
+| M4 Commit 与 Checkout | 完成 | Core commands、有限 mutation、四个 package-root API、分叉与并发测试 | 后续状态、Diff、verify 与 export 留在 M5 |
+| M5 Review 与完整性能力 | 下一步 | Diff、drift、verify、export 契约已有设计，M4 版本操作前置已完成 | 实现与覆盖测试尚未开始 |
 | M6 稳定发布 | 未开始 | `prepare`、tarball consumer smoke 与调用方文档已建立 | 完整 fixtures、CI matrix、正式发布与兼容性承诺未完成 |
 | U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端，使用 Core 返回的 Markdown 与资源基准 | 按当前策略等待 Core 0.1 闭环完成后启动 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
@@ -238,40 +238,96 @@ Public API：
 - POSIX 本地文件系统路径会刷新临时文件、发布目录项以及锁删除后的目录元数据。Windows 会刷新临时文件，但 Node 缺少可移植目录 fsync/write-through，当前只承诺较弱的原子可见性，尚未完成 Windows CI 验证；
 - 提前加入 `prepare` 构建生命周期和独立 tarball consumer smoke，避免干净 checkout 打出的包缺少 `dist/`。
 
-截至 2026-09-07，`npm test` 的 61 项测试在 Node 20.19.5 与当前开发环境 Node 26.3.0 全部通过。覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、真实跨进程 create/save 竞争、generation/document/path 身份冲突、symlink/hardlink 防护、故障注入、commit point 之后的错误语义、清理失败报告、只读权限保持、临时文件及极端 umask 权限、历史完整性、未知 JSON 原样保留、动态时区下确定性以及 package-root 写 API。
+M3 完成时的测试在 Node 20.19.5 与当前开发环境 Node 26.3.0 全部通过。覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、真实跨进程 create/save 竞争、generation/document/path 身份冲突、symlink/hardlink 防护、故障注入、commit point 之后的错误语义、清理失败报告、只读权限保持、临时文件及极端 umask 权限、历史完整性、未知 JSON 原样保留、动态时区下确定性以及 package-root 写 API。仓库当前测试总数以后续 `npm test` 输出为准，不在路线图中固化滚动数字。
 
 ### M4：Commit 与 Checkout
 
-状态：**未开始**
+状态：**完成**
 
 目标：完成“保存不产生版本，显式 commit 才固化版本”的核心语义。
 
-实现范围：
+开发原则：MDV 的编辑底子就是普通 Markdown，不为版本能力复杂化普通编辑流程。宿主内存 buffer、包内工作副本和已提交版本严格分开：
+
+```text
+宿主编辑器内存 buffer
+  -> saveReference/saveDocument
+ref_tree/current.md 或 doc_tree/current.md
+  -> explicit commit
+versions/<version-id>/content.md
+```
+
+- 编辑器内存 buffer 的撤销栈、未保存状态和自动保存时机归宿主；
+- `current.md` 是可反复覆盖保存的普通 Markdown 工作副本；save 只更新目标工作副本并执行 generation CAS，不创建 Version、不移动 Head；
+- 不引入 `DraftVersion`、`workspace`、pending bind 或另一套草稿状态机；
+- Document bind 只属于 commit 后的不可变 Document Version，工作副本不保存 bind；
+- 多进程冲突等价于普通 Markdown 被外部修改：Core 返回 `CONFLICT` 并阻止覆盖，宿主决定重载、比较、合并或另存为。
+
+已交付 public API（均从 package root 导出）：
+
+```ts
+interface CommitInput {
+  readonly expectedGeneration: number
+  readonly actor: Actor
+  readonly summary: string
+}
+
+interface CommitDocumentInput extends CommitInput {
+  readonly referenceVersion: VersionId | null
+}
+
+type CommitResult =
+  | { readonly created: true; readonly version: VersionId; readonly document: MdvDocument }
+  | { readonly created: false; readonly reason: 'no-changes'; readonly document: MdvDocument }
+
+interface CheckoutInput {
+  readonly version: VersionId
+  readonly expectedGeneration: number
+  readonly discardChanges?: boolean
+}
+
+interface MdvDocument {
+  commitReference(input: CommitInput): Promise<CommitResult>
+  commitDocument(input: CommitDocumentInput): Promise<CommitResult>
+  checkoutReference(input: CheckoutInput): Promise<MdvDocument>
+  checkoutDocument(input: CheckoutInput): Promise<MdvDocument>
+}
+```
+
+实际交付：
 
 - 增加 Core command 层，在事务锁内基于最新 state 计算 mutation；
 - 使用密码学安全随机源生成不透明 Version ID；
 - `commitReference` 保存完整正文快照，以当前 Reference HEAD 为 parent；
 - `commitDocument` 保存完整正文快照，以当前 Document HEAD 为 parent；
 - `commitDocument.referenceVersion` 必须显式为一个已存在的 Reference Version 或 `null`；
+- commit 不接收 Markdown 参数，只读取已经 save 的目标 `current.md`；尚在编辑器内存中的内容必须由宿主先保存；
 - commit 写入 actor、summary、RFC 3339 时间、SHA-256 和 content bytes；
 - 内容和 bind 都未变化时返回 `created: false, reason: 'no-changes'`；
+- no-changes 仍是一笔成功 commit 事务，不创建 Version，但 generation 精确增加 1；
+- 没有 Head 时，第一次显式 commit 即使 `current.md` 为空也创建 parent 为 `null` 的根 Version；
 - Document 正文未变化但 bind 改变时仍创建新版本；
-- checkout 只恢复目标版本正文并移动对应 HEAD，不创建版本；
+- checkout 只恢复目标版本正文并移动对应 HEAD，不创建版本；成功时 generation 精确增加 1；
+- checkout 默认拒绝覆盖相对 Head 已 dirty 的 `current.md`，返回 `CONFLICT`；只有调用方显式传 `discardChanges: true` 才覆盖；
 - 从旧版本 checkout 后再次 commit 形成可追踪分叉，旧版本保持不可变。
 
-验收条件：
+验收结果：
 
 - 在零个 Reference Version 的包中，`referenceVersion: null` 可以连续创建 Document 历史；
 - `R1 -> R2` 与 `D1(bind R1) -> D2(bind R2)` 重新打开后关系不变；
 - Reference 侧不存反向 bind，反向关系可完全从 Document meta 重建；
 - 查看旧版本不会改变工作副本或 HEAD；
+- commit 读取已保存工作副本，不会把编辑器尚未 save 的内存 buffer 误当成版本正文；
+- 第一次显式空 commit 创建根 Version；已有 Head 后 no-changes 不创建 Version，但 generation 增加 1；
+- dirty 工作副本在普通 checkout 下得到 `CONFLICT`，显式 `discardChanges: true` 才能被历史正文替换；
 - checkout 后 commit 可以形成分叉，`getChildren` 返回稳定顺序；
 - 已有 version 的 meta 和 content 永远不被原地修改；
 - commit/checkout 同样遵守 M3 的 generation CAS 和原子事务。
 
+以上行为已有 Core command、package-root API、重开、分叉、输入错误、generation CAS 和真实跨进程竞争测试。当前完整测试数量以 `npm test` 输出为准。
+
 ### M5：Review、状态与完整性能力
 
-状态：**未开始**
+状态：**下一步**
 
 目标：补齐版本查看、Review、漂移判断和完整性诊断，使 Core 达到“可读、可写、可追踪、可 Review”的 0.1 闭环。
 
@@ -345,7 +401,7 @@ MarkText adapter 位于 `../markText`，不进入 `@mdv/core`。Muya State 不�
 
 ### U3：独立 CLI / Agent tool
 
-状态：**等待 M3/M4**
+状态：**等待 Core 0.1 闭环**
 
 CLI 是完全独立的上游业务项目：
 
@@ -360,16 +416,16 @@ CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
 
 ## 6. 下一批开发任务
 
-下一批进入 M4，不同时启动 VS Code、MarkText 或 CLI：
+下一批进入 M5，不同时启动 VS Code、MarkText 或 CLI：
 
-1. 定义最小 Core commit/checkout commands 和 archive mutation，不开放任意 ZIP entry 编辑；
-2. 实现 Reference 与 Document 的不可变 Version 创建、parent 与 Head 更新；
-3. 让 `commitDocument` 显式接收一个已存在的 Reference Version 或 `null`，不隐式绑定当前 Reference Head；
-4. 实现 no-changes、仅 bind 改变、从旧 Head 分叉等语义；
-5. 实现 checkout 只恢复工作副本并移动对应 Head、不创建 Version；
-6. 复用 M3 的 documentId/generation CAS、临时包全验和原子事务，不建立第二套写路径；
-7. 补齐 commit/checkout 的 package-root API、fixtures、并发与重开 trace 测试；
-8. 继续只发布一个 `@mdv/core`，不增加 Repository、Provider、Factory 或第二存储后端。
+1. 在现有只读 snapshot 上实现 Reference/Document working-copy dirty 状态；
+2. 区分 unbound 与 Reference drift，不把 `referenceVersion: null` 当作漂移；
+3. 实现受读取上限约束的 Markdown 源文本逐行 Diff，并同时提供结构化 hunks 与 unified text；
+4. 实现 `verify({ mode: 'metadata' | 'full' })`，full 模式校验全部历史正文；
+5. 实现工作副本与指定历史版本的 `exportMarkdown`，保持原始字节；
+6. 复用现有索引、惰性正文读取和稳定错误边界，不引入 Markdown AST 或第二存储后端；
+7. 补齐 package-root API、限制条件、损坏历史、drift/diff/export 和端到端测试；
+8. 继续只发布一个 `@mdv/core`，不增加 Repository、Provider、Factory 或宿主专属 DTO。
 
 ## 7. 暂不进入 0.1 的工作
 

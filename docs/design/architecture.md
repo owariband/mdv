@@ -1,4 +1,4 @@
-# MDV Core 架构与产品设计（Draft 0.5）
+# MDV Core 架构与产品设计（Draft 0.6）
 
 > 状态：设计草案
 >
@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M3 的 create、read、trace 与 working-copy save 已完成；commit/checkout 从 M4 开始。
+> 实现进度：M4 已完成；create/read/trace/save/commit/checkout 均已从 package root 提供。公开 dirty/drift、diff、verify 与 export 留在 M5。
 
 ## 1. 背景与目标
 
@@ -44,10 +44,12 @@ doc_tree/current.md（可变成品工作副本）
 ```
 
 - `ref_tree/current.md` 和 `doc_tree/current.md` 可以反复保存，不产生历史版本。
+- 不做版本操作时，两个 `current.md` 的编辑语义就是普通 Markdown；编辑器内存 buffer 与撤销栈由宿主管理。
 - 只有显式 `commit` 才创建不可变版本。
 - 每个 Document Version 可以绑定一个精确的 Reference Version；不使用摘要能力时也可以显式不绑定。
 - 摘要更新后产生 R2，不会修改仍绑定 R1 的旧成品版本。
 - 不额外维护 `seed`、`requirements`、`approved`、`published` 等命名指针。
+- 不增加 `DraftVersion`、`workspace` 或 pending bind 来重复表达普通 Markdown 的编辑状态。
 
 ### 1.2 设计目标
 
@@ -92,6 +94,19 @@ doc_tree/current.md（可变成品工作副本）
 - **Document Working Copy**：当前成品或 Agent 草稿，物理文件为 `doc_tree/current.md`。
 
 普通保存只更新工作副本。保存后的内容即使尚未 commit，也必须随 `.mdv` 文件持久化，关闭编辑器后不能丢失。
+
+编辑状态只有三个清楚的边界：
+
+```text
+编辑器内存 buffer             # 宿主负责，可能尚未 save
+        ↓ save
+ref_tree/current.md / doc_tree/current.md
+                               # Core 持久化的普通 Markdown 工作副本
+        ↓ explicit commit
+versions/<id>/content.md       # Core 创建的不可变历史快照
+```
+
+Core 不持久化编辑器撤销栈、光标或未传给 save 的 buffer，也不建立 `DraftVersion`、`workspace`、pending bind 等平行状态。对 `current.md` 的多进程保存冲突按照普通文档的外部修改处理：Core 用 generation CAS 返回 `CONFLICT`，宿主决定重载、比较、合并或另存为。
 
 新建 `.mdv` 时两个工作副本都是零字节 Markdown，两个版本目录为空，两个 Head 均不存在，`generation = 0`。初始化不会伪造“空的 R1/D1”；第一次显式 commit 才产生第一个版本。
 
@@ -489,14 +504,26 @@ interface MdvDocument extends DocumentSnapshot {
 
 ```ts
 interface CommitInput {
-  expectedGeneration: number
-  actor: Actor
-  summary: string
+  readonly expectedGeneration: number
+  readonly actor: Actor
+  readonly summary: string
 }
 
 interface CommitDocumentInput extends CommitInput {
-  referenceVersion: VersionId | null
+  readonly referenceVersion: VersionId | null
 }
+
+type CommitResult =
+  | {
+      readonly created: true
+      readonly version: VersionId
+      readonly document: MdvDocument
+    }
+  | {
+      readonly created: false
+      readonly reason: 'no-changes'
+      readonly document: MdvDocument
+    }
 
 interface MdvDocument {
   commitReference(input: CommitInput): Promise<CommitResult>
@@ -519,14 +546,19 @@ interface MdvDocument {
 4. 把 `input.referenceVersion` 写入新版本的 `meta.json.referenceVersion`；
 5. 将 `doc_tree/HEAD` 更新为新版本。
 
-如果 Reference 工作副本相对 `ref_tree/HEAD` 没有变化，`commitReference` 返回 `created: false, reason: 'no-changes'`。Document 的正文未变化且传入的 Reference Version（包括 `null`）与 `doc_tree/HEAD` 对应版本相同时，`commitDocument` 同样不创建版本；如果正文相同但 bind 发生变化，仍然创建新 Document Version。
+commit 不接收 `markdown`。它只读取已经通过 save 持久化的目标 `current.md`；尚在编辑器内存里的内容不是 Core 状态，宿主必须先 save 再 commit。
+
+没有 Head 时，第一次显式 commit 总是创建 parent 为 `null` 的根 Version，即使 `current.md` 为空。初始化仍然只产生零版本、零 Head，只有用户或 Agent 的显式 commit 才表达“保存这个空状态”。
+
+已有 Head 时，如果 Reference 工作副本相对 `ref_tree/HEAD` 没有变化，`commitReference` 返回 `created: false, reason: 'no-changes'`。Document 的正文未变化且传入的 Reference Version（包括 `null`）与 `doc_tree/HEAD` 对应版本相同时，`commitDocument` 同样不创建版本；如果正文相同但 bind 发生变化，仍然创建新 Document Version。no-changes 仍是一笔成功事务并让 generation 精确增加 1，`created` 只表示是否创建了 Version。
 
 ### 6.5 查看与恢复
 
 ```ts
 interface CheckoutInput {
-  version: VersionId
-  expectedGeneration: number
+  readonly version: VersionId
+  readonly expectedGeneration: number
+  readonly discardChanges?: boolean
 }
 
 interface MdvDocument {
@@ -537,8 +569,9 @@ interface MdvDocument {
 
 - 查看旧版本只调用 `readVersion`，不会改变工作状态。
 - checkout 才把历史正文恢复到工作副本，并把相应 Head 设置为该版本。
+- checkout 默认比较目标树的 `current.md` 与当前 Head；工作副本 dirty 时返回 `CONFLICT`，避免静默丢失已经 save 的普通 Markdown。只有调用方显式传入 `discardChanges: true` 才允许覆盖。
 - checkout Document Version 不额外写入 bind；该历史版本原来的 bind 始终保存在它自己的 `meta.json.referenceVersion` 中。
-- checkout 不创建版本；用户继续修改并 commit 后才形成新历史节点。
+- checkout 不创建版本；成功事务让 generation 精确增加 1。用户继续修改并 commit 后才形成新历史节点。
 
 ### 6.6 能力到 API 的映射
 
@@ -580,7 +613,7 @@ save、commit 和 checkout 都是完整文档写事务：
 -> 释放锁并返回新 snapshot
 ```
 
-M3 已为 `createMdv`、`saveReference` 和 `saveDocument` 落地这套事务。commit 与 checkout 尚未实现，但必须复用同一路径，不能建立第二套 Writer。generation 或 document identity 不匹配时返回 `CONFLICT`，不自动重试或覆盖。调用方应重新打开文档，比较工作副本变化，再决定如何合并。
+M3 为 `createMdv`、`saveReference` 和 `saveDocument` 落地了这套事务；M4 的 commit 与 checkout 已复用同一路径，没有建立第二套 Writer。generation 或 document identity 不匹配时返回 `CONFLICT`，不自动重试或覆盖。这等价于普通 Markdown 被其他进程修改：调用方应重新打开文档，再决定重载、比较、合并或另存为；Core 不替宿主处理编辑器内存 buffer。
 
 原子替换成功是事务的 commit point。它之前的写 ZIP、校验或 fsync 失败都必须保持旧包 byte-for-byte 不变；它之后若目录同步失败，新 generation 可能已经提交，错误 details 必须包含 `stage: 'sync-directory'`、`committed: true` 和已写入的 generation。此时调用方不能用旧快照盲目重试，而应重新 `openMdv` 确认磁盘状态。
 
@@ -599,8 +632,8 @@ Agent 一次成品编辑任务的标准流程：
 1. 打开 `.mdv`，读取 status、`ref_tree/HEAD` 和 `doc_tree/HEAD`。
 2. 如果任务依赖摘要，选择一个已经 commit 的 Reference Version 并固定其精确 ID；否则固定为 `null`。
 3. 按需读取选中的 Reference Version、当前成品和少量相关历史，不加载全部正文；选择 `null` 时跳过 Reference 正文。
-4. 调用 `saveDocument({ markdown, expectedGeneration })` 保存草稿，并用返回的新 `MdvDocument` 继续操作；可以重复多次，不产生版本。
-5. 用户或 Agent 明确决定保留版本时，调用 `commitDocument({ referenceVersion, actor, summary })`。
+4. 调用 `saveDocument({ markdown, expectedGeneration })` 保存普通 Markdown 工作副本，并用返回的新 `MdvDocument` 继续操作；可以重复多次，不产生版本。
+5. 用户或 Agent 明确决定保留版本时，在确认编辑器 buffer 已 save 后调用 `commitDocument({ referenceVersion, actor, summary, expectedGeneration })`；commit 本身不接收正文。
 6. 新 Document Version 把这次 commit 传入的 ID 或 `null` 写入自己的 `meta.json.referenceVersion`，因此后续可以确定它基于哪个摘要版本，或确定它没有摘要依赖。
 
 如果摘要工作副本有未提交修改，Agent 有两种明确选择：
@@ -786,12 +819,12 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 3. 工作副本和版本正文 byte-for-byte round-trip，包括 CRLF、中文、front matter、代码块、表格、数学公式和 Mermaid。
 4. 连续多次 save 不增加版本数；commit 只增加一个版本。
 5. `referenceVersion: null` 可以在零个 Reference Version 的包中连续创建 Document 历史。
-6. 正文与绑定 Reference（包括 `null`）都未变化时 commit 不创建版本。
+6. 首次显式 commit 即使工作副本为空也创建根版本；已有 Head 后正文与绑定 Reference（包括 `null`）都未变化时不创建版本但 generation 增加 1。
 7. 正文未变化但绑定 Reference 改变时，document commit 创建新版本。
-8. checkout 只恢复工作状态；后续 commit 才形成分叉。
+8. checkout 只恢复工作状态；dirty 工作副本默认冲突，显式 discard 后才能覆盖；后续 commit 才形成分叉。
 9. `getHistory`、`traceDocument`、`traceReference` 在直线历史与分叉历史中返回正确关系。
 10. 原子写入故障注入：在写 ZIP、校验、fsync、替换各阶段失败，旧包仍可读。
-11. 两个 writer 使用相同 generation 时，最多一个成功，另一个得到 `CONFLICT`。
+11. 两个 writer 使用相同 generation 时，最多一个成功，另一个得到 `CONFLICT`；宿主可以按普通文档外部修改流程重载或合并。
 12. `save -> commit -> reopen -> verify(full) -> export` 端到端测试。
 13. 后续 Python 只读实现运行同一套 fixtures，证明格式未绑定 TypeScript。
 
@@ -820,7 +853,7 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 3. 实现 M1 内部 Reader、版本图校验与查询。
 4. 实现 M2 公开只读 API：`parse/open`、工作副本读取、版本索引、trace 与 `readVersionBytes/Text`。
 5. 实现 M3 工作副本 Writer：`createMdv`、`saveReference`、`saveDocument`、generation CAS 和原子替换。
-6. 实现 M4 `commitReference`、`commitDocument` 和 checkout。
+6. 已实现 M4 `commitReference`、`commitDocument` 和 checkout。
 7. 实现 M5 Diff、Reference 漂移、`verify` 与 `exportMarkdown`。
 8. 实现内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
 9. 用真实复杂 Markdown 和资源 sidecar 完成 M6 发布收口，再启动独立 VS Code extension；MarkText adapter 后续接入。

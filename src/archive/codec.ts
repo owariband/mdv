@@ -115,6 +115,14 @@ export function encodeManifestValue(value: ManifestFileDto): Uint8Array {
   return encodeJson(decodeManifestValue(value).value)
 }
 
+export function encodeReferenceVersionValue(value: VersionMetaFileDto): Uint8Array {
+  return encodeJson(decodeReferenceVersionValue(value).value)
+}
+
+export function encodeDocumentVersionValue(value: DocumentVersionMetaFileDto): Uint8Array {
+  return encodeJson(decodeDocumentVersionValue(value).value)
+}
+
 function decodeVersionValue(
   input: unknown,
   kind: 'reference-version',

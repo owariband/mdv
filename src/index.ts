@@ -7,6 +7,10 @@ export {
 } from './types.js'
 export type {
   Actor,
+  CheckoutInput,
+  CommitDocumentInput,
+  CommitInput,
+  CommitResult,
   CreateOptions,
   DocumentId,
   DocumentSnapshot,
