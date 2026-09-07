@@ -1,4 +1,4 @@
-# MDV Core 架构与产品设计（Draft 0.6）
+# MDV Core 架构与产品设计（Draft 0.7）
 
 > 状态：设计草案
 >
@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M4 已完成；create/read/trace/save/commit/checkout 均已从 package root 提供。公开 dirty/drift、diff、verify 与 export 留在 M5。
+> 实现进度：M5 已完成；create/read/trace/save/commit/checkout、结构化 status、统一内容选择、通用源码 Diff 与完整性诊断均已从 package root 提供。受管资源在 M5.5 单独实现。
 
 ## 1. 背景与目标
 
@@ -181,14 +181,21 @@ doc_tree/HEAD = D3
 Reference Working Copy 为 dirty，当且仅当：
 
 - 没有 `ref_tree/HEAD` 且 `ref_tree/current.md` 非空；或
-- `ref_tree/current.md` 的 SHA-256 与 `ref_tree/HEAD` 对应版本正文不同。
+- 有 `ref_tree/HEAD`，且 `ref_tree/current.md` 原始 bytes 的 `byteLength` 或 SHA-256 与该 Head metadata 的 `contentBytes` / `contentSha256` 不同。
 
 Document Working Copy 为 dirty，当且仅当：
 
 - 没有 `doc_tree/HEAD` 且 `doc_tree/current.md` 非空；
-- 或 `doc_tree/current.md` 的 SHA-256 与 `doc_tree/HEAD` 对应版本正文不同。
+- 或有 `doc_tree/HEAD`，且 `doc_tree/current.md` 原始 bytes 的 `byteLength` 或 SHA-256 与该 Head metadata 的 `contentBytes` / `contentSha256` 不同。
 
 工作副本本身不保存 bind。即使成品文字没有变化，只要 `commitDocument` 传入了新的 Reference Version，仍然创建一个具有新版本语义的 Document Version。
+
+Document HEAD 与当前 Reference HEAD 的关系必须穷举为四种状态：
+
+- `no-document-head`：当前没有 Document HEAD。即使包中保留了不可达的历史 Document Version，也不能把它当作当前成品版本；
+- `unbound`：Document HEAD 对应版本的 `referenceVersion = null`；
+- `aligned`：Document HEAD 绑定的 Reference Version 等于当前 Reference HEAD；
+- `drifted`：Document HEAD 绑定了 Reference Version，但它不等于当前 Reference HEAD。合法历史中 Reference HEAD 也可能缺失，因此漂移结果中的当前 Reference 可以为 `null`。
 
 已提交且绑定了 Reference 的成品发生 Reference 漂移，当：
 
@@ -199,7 +206,7 @@ doc_tree/versions/<doc_tree/HEAD>/meta.json.referenceVersion
 
 漂移只产生状态提示，不自动修改 `doc_tree/current.md`，也不自动创建新版本。
 
-`referenceVersion = null` 是合法的 unbound 状态，不算格式错误，也不算漂移。没有使用 Reference 的文档可以一直只提交 Document Version，从而退化为普通的带版本 Markdown 文档。
+`referenceVersion = null` 是合法的 unbound 状态，不算格式错误，也不算漂移。没有 Document HEAD 与 Document HEAD 明确 unbound 也不是同一种状态；宿主会据此分别展示“尚未提交”和“此版本不依赖 Reference”。没有使用 Reference 的文档可以一直只提交 Document Version，从而退化为普通的带版本 Markdown 文档。
 
 ## 4. `.mdv` 物理格式
 
@@ -305,9 +312,9 @@ Document Version 的 `referenceVersion` 可以落后于 `ref_tree/HEAD`。这是
 
 ### 4.6 相对链接与受管资源
 
-0.1 不将附件写入包内。Markdown 中的相对链接和图片地址以 `.mdv` 文件所在目录作为基准，而不是以 ZIP 内路径为基准。`export` 只导出 Markdown，不隐式复制外部附件。
+0.1 不将附件写入包内。Markdown 中的相对链接和图片地址以 `.mdv` 文件所在目录作为基准，而不是以 ZIP 内路径为基准。通过 `readContent(...).bytes` 取得 Markdown 时不隐式复制外部附件。
 
-官方 Core 将提供外部受管资源能力。导入的图片等资源使用内容寻址 sidecar：
+官方 Core 将在 M5.5 提供外部受管资源能力。导入的图片等资源使用内容寻址 sidecar：
 
 ```text
 example.mdv
@@ -330,11 +337,10 @@ Markdown 直接记录相对路径 `./.mdv-assets/<documentId>/<sha256>.<extensio
 -> 分别解析 ref_tree、doc_tree 的指针和 version meta
 -> 校验 ID、Schema、Head、parent 和 referenceVersion
 -> 校验两条 parent 图无环
--> 计算 dirty 与 Reference 漂移状态
 -> 返回只包含元数据索引的 DocumentSnapshot
 ```
 
-`open` 不默认解压所有历史 `content.md`。`readVersion` 首次读取某版本正文时验证长度和 SHA-256；`verify({ mode: 'full' })` 才遍历全部正文。
+`open` 会按既有 Reader 安全规则读取并校验两个固定的 `current.md`，但不默认解压任何历史 `content.md`。`getStatus()` 通过异步 Reader contract 取得两份工作副本，将原始 bytes 的 `byteLength` 和 SHA-256 与已有 Head metadata 比较并计算 Reference 关系；读取某版本正文时验证长度和 SHA-256；顶层 `verifyMdv(..., { mode: 'full' })` 才遍历全部历史正文。
 
 ### 5.2 必须校验的语义
 
@@ -396,7 +402,11 @@ interface CreateOptions extends OpenOptions {
 
 `createMdv` 创建 generation 为 0 的空容器；目标路径已存在时以 `CONFLICT` 失败，不能覆盖。创建成功后返回路径绑定的 `MdvDocument`，可以直接读取或保存。
 
-### 6.1 只读能力
+### 6.1 M5 Agent-friendly 只读能力与公开契约
+
+M2-M4 的 open/read/trace/save/commit/checkout 是实现 `.mdv` 格式语义所必需的基础能力。相比之下，M5 新增的结构化状态、确定性 Diff 与聚合诊断主要服务 Agent Runtime、自动化工具和无 UI 调用方：它们让调用者无需自行解包、计算哈希、拼接文本输出或猜测绑定状态。对普通人而言，这些 API 的直接价值较小；人类使用者真正需要的 Reference/Document 左右对照，只要求 Core 根据 Document Version 的 bind 精确定位并读取两份 Markdown，具体布局、渲染、同步滚动和交互均由 VS Code、MarkText 等上游实现。
+
+这些能力仍放在 Core，是因为工作副本状态、源码 Diff 和归档诊断都需要共享格式不变量、字节保真与资源上限。由 Core 提供一套可复用且确定的语义，可以避免每个 Agent tool 重写出互不一致的实现；Core 不因此增加 Agent 专属 DTO、面向模型的 token 裁剪策略或任何 Review UI。
 
 ```ts
 interface MarkdownSource {
@@ -417,14 +427,122 @@ interface MdvWarning {
   readonly message: string
 }
 
+interface TreeWorkingCopyStatus {
+  readonly head: VersionId | null
+  readonly dirty: boolean
+}
+
+type ReferenceRelation =
+  | { readonly kind: 'no-document-head' }
+  | { readonly kind: 'unbound' }
+  | {
+      readonly kind: 'aligned'
+      readonly referenceVersion: VersionId
+    }
+  | {
+      readonly kind: 'drifted'
+      readonly boundReference: VersionId
+      readonly currentReference: VersionId | null
+    }
+
+interface DocumentStatus {
+  readonly reference: TreeWorkingCopyStatus
+  readonly document: TreeWorkingCopyStatus
+  readonly referenceRelation: ReferenceRelation
+}
+
+type ContentSpec =
+  | {
+      readonly tree: TreeKind
+      readonly kind: 'working-copy'
+    }
+  | {
+      readonly tree: TreeKind
+      readonly kind: 'version'
+      readonly version: VersionId
+    }
+
+type DiffLine =
+  | {
+      readonly kind: 'context'
+      readonly oldLine: number
+      readonly newLine: number
+      readonly text: string
+    }
+  | {
+      readonly kind: 'deletion'
+      readonly oldLine: number
+      readonly newLine: null
+      readonly text: string
+    }
+  | {
+      readonly kind: 'addition'
+      readonly oldLine: null
+      readonly newLine: number
+      readonly text: string
+    }
+
+interface DiffHunk {
+  readonly oldStart: number
+  readonly oldLines: number
+  readonly newStart: number
+  readonly newLines: number
+  readonly lines: readonly DiffLine[]
+}
+
+interface DiffLimits {
+  readonly maxInputBytes: number
+  readonly maxInputLines: number
+  readonly maxEditLength: number
+  readonly maxHunks: number
+  readonly maxOutputBytes: number
+}
+
+interface DiffOptions {
+  readonly contextLines?: number
+  readonly limits?: Partial<DiffLimits>
+}
+
+interface DiffResult {
+  readonly hunks: readonly DiffHunk[]
+  readonly unifiedText: string
+}
+
+type VerifyMode = 'metadata' | 'full'
+
+interface VerifyOptions extends OpenOptions {
+  readonly mode?: VerifyMode
+  readonly maxIssues?: number
+}
+
+interface VerifyIssue {
+  readonly code: MdvErrorCode
+  readonly message: string
+  readonly entry?: string
+  readonly path?: string
+  readonly details: MdvErrorDetails
+}
+
+interface VerifyReport {
+  readonly mode: VerifyMode
+  readonly valid: boolean
+  readonly complete: boolean
+  readonly issues: readonly VerifyIssue[]
+  readonly warnings: readonly MdvWarning[]
+}
+
+export function verifyMdv(
+  source: string | Uint8Array,
+  options?: VerifyOptions,
+): Promise<VerifyReport>
+
 interface DocumentSnapshot {
-  readonly manifest: Manifest
+  readonly manifest: ManifestSummary
   readonly packagePath: string | null
   readonly baseDirectory: string | null
   readonly referenceTree: { readonly head: VersionId | null }
   readonly documentTree: { readonly head: VersionId | null }
   readonly warnings: readonly MdvWarning[]
-  readonly status: DocumentStatus
 
   listVersions(query: { readonly tree: 'reference' }): readonly ReferenceVersionSummary[]
   listVersions(query: { readonly tree: 'document' }): readonly DocumentVersionSummary[]
@@ -443,13 +561,11 @@ interface DocumentSnapshot {
   readDocument(): Promise<MarkdownSource>
   readReferenceText(): Promise<string>
   readDocumentText(): Promise<string>
-  readVersion(id: VersionId): Promise<VersionRecord>
   readVersionBytes(id: VersionId): Promise<Uint8Array>
   readVersionText(id: VersionId): Promise<string>
+  getStatus(): Promise<DocumentStatus>
+  readContent(source: ContentSpec): Promise<MarkdownSource>
   diff(from: ContentSpec, to: ContentSpec, options?: DiffOptions): Promise<DiffResult>
-  getReferenceDrift(document?: VersionId): ReferenceDrift | null
-  verify(options?: VerifyOptions): Promise<VerifyReport>
-  exportMarkdown(source?: 'working' | VersionId): Promise<Uint8Array>
 }
 ```
 
@@ -461,9 +577,20 @@ interface DocumentSnapshot {
 - `listDocumentsUsingReference` 从 Document Version 的单向 bind 建立反向内存索引，不向 Reference Version 写回数据。
 - `readReference` 和 `readDocument` 分别读取 `ref_tree/current.md` 与 `doc_tree/current.md`，同时返回 profile、资源基准目录和来源描述。
 - `readVersionBytes` 是正文保真的基础 API；`*Text` 是严格 UTF-8 解码的便利 API，不执行 Markdown 解析。
-- `diff` 可以比较任意版本，也可以比较工作副本与其 Head。
-- `exportMarkdown()` 默认导出 `doc_tree/current.md` 工作副本，而不是最后一次 commit。
+- `getStatus()` 是异步方法，因为它沿用异步 Reader contract 取得工作副本；它将工作副本原始 bytes 的 `byteLength` 和 SHA-256 与已有 Head metadata 的 `contentBytes` / `contentSha256` 比较，不需要额外读取 Head 正文，也不改变 `openMdv` 已有的工作副本校验策略。
+- `TreeWorkingCopyStatus` 只保留调用方当前需要的 `head + dirty`；clean/dirty 没有不同 payload，不为它们制造形式化判别联合。
+- `ReferenceRelation` 描述当前 Document HEAD 与 Reference HEAD 的关系。`no-document-head`、`unbound`、`aligned`、`drifted` 是互斥且完备的调用方分支；Document HEAD 已由 `DocumentStatus.document.head` 给出，不在每个 relation 分支重复。`drifted.currentReference` 允许为 `null`。
+- `readContent` 是工作副本和历史版本的统一选择入口。`ContentSpec.tree` 与 Version 所属树不一致时返回 `NOT_FOUND`；已有的 `readReference`、`readDocument` 和 `readVersionBytes/Text` 保留为便利 API。
+- `diff` 的两端都使用同一个 `ContentSpec`，因此可以比较任意合法的工作副本/版本组合。`DiffLine.oldLine/newLine` 用 `null` 明确表示该侧不存在这一行；`text` 保留原始行结束符，默认不隐藏 CRLF、空白、Unicode 或末尾换行差异。
+- `diff` 默认保留 3 行上下文，输入合计限制为 8 MiB / 200,000 行，最大编辑距离 2,048，最多 10,000 个 hunk，unified text 最多 16 MiB；任一超限整体返回 `LIMIT_EXCEEDED`，不返回部分结果。
+- `readContent(source).bytes` 已完整覆盖“导出当前或历史 Markdown”的需求；M5 不再增加含糊且重复的独立 export API。
+- `verifyMdv` 是 package-root 顶层诊断入口，不挂在已经成功构造的 snapshot 上。这样即使源文件损坏到无法构造 snapshot，调用方仍可请求诊断；普通 `openMdv`/`parseMdv` 继续在首个阻断错误处失败。
+- `verifyMdv` 的 `metadata` 模式检查容器、manifest、两个工作副本、Head、版本 metadata、parent/bind 和图；`full` 在此基础上流式遍历所有历史正文，检查 UTF-8、长度与 SHA-256。它在安全可继续的范围内聚合相互独立的问题，不为聚合而绕过资源上限；阻断错误、资源上限或 `maxIssues` 使检查无法走完时，报告以 `complete: false` 明确表示结果不完整。
+- 路径 source 不存在或根本无法读取时，没有可供聚合的归档诊断，`verifyMdv` 仍分别抛出 `NOT_FOUND` 或 `IO_ERROR`；无效 option 继续抛 `TypeError` / `RangeError`。
+- `verifyMdv.maxIssues` 默认 100。metadata 阶段若无法建立可信索引，以阻断 issue 和 `complete: false` 停止；索引建立后，图校验和 full 历史正文校验会在剩余预算内聚合独立问题。
 - 所有返回集合和元数据都是只读快照，调用方修改它们不能改变包内容。
+
+M5 的以上能力全部是只读查询：facade 复用现有 Archive Reader 按需取得原始字节，由 `core/` 计算 status、关系和 Diff；`verifyMdv` 复用现有容器校验与流式正文校验。它们是建立在 M2-M4 格式能力之上的 Agent-friendly 便利层，不改变 Reference/Document 左右对照仍由 bind + 精确读取组成的事实。M5 不修改 Format 0.1，不进入 Writer、锁、generation CAS 或原子替换链，也不新增第二种存储抽象。
 
 ### 6.2 Markdown 内容交接边界
 
@@ -567,7 +694,7 @@ interface MdvDocument {
 }
 ```
 
-- 查看旧版本只调用 `readVersion`，不会改变工作状态。
+- 查看旧版本只调用 `readContent` 或 `readVersionBytes/Text`，不会改变工作状态。
 - checkout 才把历史正文恢复到工作副本，并把相应 Head 设置为该版本。
 - checkout 默认比较目标树的 `current.md` 与当前 Head；工作副本 dirty 时返回 `CONFLICT`，避免静默丢失已经 save 的普通 Markdown。只有调用方显式传入 `discardChanges: true` 才允许覆盖。
 - checkout Document Version 不额外写入 bind；该历史版本原来的 bind 始终保存在它自己的 `meta.json.referenceVersion` 中。
@@ -587,12 +714,13 @@ interface MdvDocument {
 | 沿 parent 追踪一棵树的历史 | `getHistory` / `getChildren` |
 | 查看成品版本绑定的摘要 | `getDocumentReference` / `traceDocument` |
 | 查看摘要的历史与受影响成品 | `traceReference` / `listDocumentsUsingReference` |
-| 按需读取旧版本 | `readVersion` / `readVersionBytes` |
+| 按需读取旧版本 | `readVersionBytes` / `readVersionText` |
 | 恢复旧版本到工作副本 | `checkoutReference` / `checkoutDocument` |
+| 读取任意工作副本或版本 | `readContent` |
+| 查看 dirty 与 Reference 关系 | `getStatus` |
 | 比较工作副本或版本 | `diff` |
-| 检测 Reference 漂移 | `getReferenceDrift` |
-| 全量完整性检查 | `verify({ mode: 'full' })` |
-| 导出当前或历史 Markdown | `exportMarkdown` |
+| 诊断 metadata 或全部历史正文 | `verifyMdv` |
+| 取得可导出的原始 Markdown | `readContent(...).bytes` |
 
 ## 7. 写入与并发模型
 
@@ -629,7 +757,7 @@ M3 为 `createMdv`、`saveReference` 和 `saveDocument` 落地了这套事务；
 
 Agent 一次成品编辑任务的标准流程：
 
-1. 打开 `.mdv`，读取 status、`ref_tree/HEAD` 和 `doc_tree/HEAD`。
+1. 打开 `.mdv`，调用 `getStatus()` 并按需读取 `ref_tree/HEAD` 和 `doc_tree/HEAD`。
 2. 如果任务依赖摘要，选择一个已经 commit 的 Reference Version 并固定其精确 ID；否则固定为 `null`。
 3. 按需读取选中的 Reference Version、当前成品和少量相关历史，不加载全部正文；选择 `null` 时跳过 Reference 正文。
 4. 调用 `saveDocument({ markdown, expectedGeneration })` 保存普通 Markdown 工作副本，并用返回的新 `MdvDocument` 继续操作；可以重复多次，不产生版本。
@@ -644,9 +772,24 @@ Agent 一次成品编辑任务的标准流程：
 
 Core 不允许 Document Version 绑定一份尚未 commit、未来还会变化的摘要工作副本。
 
-## 9. Diff、漂移与导出
+## 9. M5 Agent-friendly 状态、Diff 与完整性诊断
 
-### 9.1 Diff
+M5 不是新的图形 Review 产品层，也不是人类查看 `.mdv` 的前置条件。其主要增量是把 Agent 和自动化工具经常重复实现的状态判断、原始文本比较与损坏诊断收敛成稳定、结构化、确定且受资源上限保护的 Core API。人类客户端可以选择使用这些结果提供提示或诊断，但最重要的左右对照模式仍由 `traceDocument` / bind 与 `readContent` 提供内容配对，上游负责展示。
+
+### 9.1 工作副本状态与 Reference 关系
+
+`getStatus()` 通过 Reader 取得打开时已经安全校验的两份工作副本，将其原始 bytes 的 `byteLength` 和 SHA-256 与已有 Head metadata 的 `contentBytes` / `contentSha256` 比较，返回 Reference/Document 各自的 clean/dirty 状态，以及当前 Document HEAD 的 `ReferenceRelation`。它不读取历史正文，也不改变 `openMdv` 的读取范围。
+
+Reference 关系只报告事实：
+
+- `no-document-head` 表示当前成品尚未 commit；
+- `unbound` 表示当前 Document Version 明确不依赖 Reference；
+- `aligned` 表示绑定版本等于 Reference HEAD；
+- `drifted` 同时返回 Document 实际绑定的 Reference 和当前 Reference HEAD，后者允许为 `null`。
+
+Reference commit 不自动修改成品工作副本、Document HEAD、bind 或历史版本。上层看到 drift 后自行决定只提示、比较，还是编辑并提交新的 Document Version。
+
+### 9.2 Diff
 
 0.1 使用 Markdown 源文本逐行 Diff，支持：
 
@@ -656,17 +799,37 @@ Core 不允许 Document Version 绑定一份尚未 commit、未来还会变化�
 - 工作副本与其 Head；
 - 任意工作副本与指定版本。
 
-默认不忽略空白、换行符或 Unicode 差异。结果同时提供结构化 hunks 和 unified diff 文本。Reference → Document 的“标题覆盖率、要求是否落实”等语义 Diff 留到后续，不能替代原始文本 Diff。
+默认不忽略空白、换行符或 Unicode 差异。结果同时提供结构化 hunks 和 unified diff 文本；输入 bytes、输入行数、算法编辑长度、输出 bytes 和 hunk 数均受上限约束，任一超限都整体返回 `LIMIT_EXCEEDED`，不返回可能被误认成完整结果的截断 Diff。Reference → Document 的“标题覆盖率、要求是否落实”等语义 Diff 留到后续，不能替代原始文本 Diff。
 
-### 9.2 Reference 漂移
+当前默认值是 3 行上下文、8 MiB 合计输入、200,000 合计行、2,048 最大编辑距离、10,000 个 hunk 和 16 MiB unified text。实现采用 bounded Myers，并用共同前后缀裁剪减少搜索范围，不引入第三方 Diff runtime。
 
-Core 报告 `doc_tree/HEAD` 对应版本是否仍绑定当前 `ref_tree/HEAD`。Document Version 未绑定 Reference 时返回 unbound 状态，不伪造成漂移。
+### 9.3 统一内容选择
 
-漂移结果只包含旧 Reference Version、新 Reference Version 和可用于 Diff 的版本对。Reference commit 不自动修改成品工作副本或历史版本。
+`readContent(ContentSpec)` 与 `diff(from, to)` 共用一套选择器，不再分别发明“working 导出参数”“version 导出参数”或 tree 推断规则：
 
-### 9.3 导出
+```ts
+await snapshot.readContent({ tree: 'document', kind: 'working-copy' })
+await snapshot.readContent({ tree: 'document', kind: 'version', version: d1 })
+await snapshot.diff(
+  { tree: 'reference', kind: 'version', version: r1 },
+  { tree: 'reference', kind: 'working-copy' },
+)
+```
 
-`exportMarkdown()` 默认导出当前 `doc_tree/current.md`，也可指定任意 Document 或 Reference Version。输出是原始 Markdown 字节，不添加 front matter、版本注释或重新格式化。
+`readContent` 返回现有 `MarkdownSource`。需要写文件、传给渲染器或实现“导出”的调用方直接使用其 `bytes`；Core 不增加只给相同原始字节换名字的独立 export 方法。
+
+### 9.4 顶层完整性诊断
+
+`verifyMdv(pathOrBytes, options)` 直接接受 `.mdv` 文件路径或包字节。它不能依赖先成功调用 `openMdv`，否则最需要诊断的损坏包反而没有入口。
+
+- `metadata` 是默认模式，检查安全 ZIP 索引、manifest、两个工作副本、Head、version metadata、parent/bind 与图，但不遍历历史 `content.md`；
+- `full` 在 metadata 基础上遍历每个历史 `content.md`，验证严格 UTF-8、字节数和 SHA-256；
+- 诊断在不突破资源限制、不基于损坏状态继续猜测的前提下聚合独立问题；阻断错误、资源上限或达到 `maxIssues` 使目标 mode 无法完整执行时返回 `complete: false`；
+- `valid` 只在本次要求的 mode 完整执行且没有 issue 时为 `true`；warning 不影响 `valid`；
+- 路径 source 不存在或无法读取时分别抛出 `NOT_FOUND` / `IO_ERROR`，因为此时没有归档内容可生成诊断报告；
+- 普通 open/read 仍然 fail-fast，不能为了诊断能力改变日常读取的错误边界。
+
+当前 `maxIssues` 默认 100。metadata 的阻断性容器/格式错误不会在不可信结构上继续猜测；建立索引后，Core 图校验可以给出多个关系问题，full 正文阶段通过单次 ZIP 扫描按稳定顺序聚合独立 UTF-8、长度与哈希错误，包括不在当前 Head ancestry 上的分支。
 
 ## 10. 错误模型
 
@@ -691,7 +854,7 @@ type MdvErrorCode =
 
 - 格式错误、完整性错误、并发冲突和 I/O 错误不得互相伪装。
 - details 可包含条目路径、Version ID、预期值和实际值，不包含完整正文。
-- `verify` 尽量收集多个独立问题；普通读取遇到阻断性问题立即失败。
+- `verifyMdv` 尽量收集多个独立问题；普通读取遇到阻断性问题立即失败。
 - 未识别的同版本可选字段和 `markdownProfile` 进入 warnings，不进入 errors。
 - 没有变化不是异常；commit 返回 `created: false`，不抛错误。
 
@@ -791,6 +954,8 @@ Agent model
 
 Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚本或 MCP tool；是否采用哪种包装方式由 Agent 宿主决定，均不属于 MDV 格式或 Core 的内部层次，也不要求常驻服务。第一版不提供官方 CLI；将来出现独立的终端使用需求时，再把 CLI 作为 Core 的外部调用方单独立项。
 
+面向人的 Reference/Document 左右对照由宿主组合现有 bind/trace 与读取接口：Core 保证某个 Document Version 精确对应其绑定的 Reference Version（或明确未绑定），宿主再决定双栏布局、Markdown 渲染、同步滚动以及是否调用编辑器原生 Diff。M5 的结构化 Diff 更偏向 Agent/自动化消费，不要求图形客户端用它替代自身的显示能力。
+
 ## 14. 一致性测试与验证
 
 ### 14.1 Fixtures
@@ -802,6 +967,7 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 - `ref_tree/current.md` 已保存但尚未 commit；
 - R1 已 commit，成品工作副本固定使用 R1，但尚无 D1；
 - `R1 -> R2` 与 `D1(referenceVersion=R1) -> D2(referenceVersion=R2)`；
+- Reference 历史仍包含 R1 但 Reference Head 为 `null`，Document Head 继续绑定 R1；
 - Reference/Document 各自从旧版本分叉；
 - 两棵树各自的工作副本 dirty；
 - 悬空 Head、parent 或非空 `referenceVersion`；
@@ -825,8 +991,12 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 9. `getHistory`、`traceDocument`、`traceReference` 在直线历史与分叉历史中返回正确关系。
 10. 原子写入故障注入：在写 ZIP、校验、fsync、替换各阶段失败，旧包仍可读。
 11. 两个 writer 使用相同 generation 时，最多一个成功，另一个得到 `CONFLICT`；宿主可以按普通文档外部修改流程重载或合并。
-12. `save -> commit -> reopen -> verify(full) -> export` 端到端测试。
-13. 后续 Python 只读实现运行同一套 fixtures，证明格式未绑定 TypeScript。
+12. `getStatus` 覆盖无 Head 的空/非空工作副本、clean/dirty，以及 `no-document-head`、`unbound`、`aligned`、`drifted(currentReference=null)` 全部分支。
+13. `readContent` 覆盖两棵树的工作副本和版本；tree 与 Version 不匹配时稳定返回 `NOT_FOUND`。
+14. Diff 覆盖所有合法 `ContentSpec` 组合、相同内容、CRLF/LF、末尾换行，以及输入 bytes/行数、编辑长度、输出 bytes、hunk 上限。
+15. `verifyMdv(metadata)` 与 `verifyMdv(full)` 覆盖无法 open 的结构错误、可聚合的独立错误、`maxIssues` 截断、`complete: false`，以及未被普通读取访问的损坏分支正文；不存在和不可读路径继续验证抛错语义。
+16. `save -> commit -> reopen -> getStatus -> diff -> verifyMdv(full) -> readContent` 端到端测试。
+17. 后续 Python 只读实现运行同一套 fixtures，证明格式未绑定 TypeScript。
 
 宿主编辑器的 `Markdown -> editor state -> Markdown` 稳定性属于对应 adapter 的集成测试。Core 只保证交给它的 Markdown 字节不会被自己改写。
 
@@ -836,14 +1006,14 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 
 1. 新建包中两个工作副本为空、没有 R1/D1，也没有 Head。
 2. 用户不使用 Reference，编辑并多次保存 `doc_tree/current.md`；版本历史仍为空。
-3. 用户执行 `commitDocument(referenceVersion: null)` 生成 D1；重新打开后可以 trace、读取和导出 D1。
+3. 用户执行 `commitDocument(referenceVersion: null)` 生成 D1；重新打开后可以 trace，并通过 `readContent` 原样读取 D1。
 4. 在另一份文档中，用户编辑 `ref_tree/current.md` 并多次保存；Reference 历史仍为空。
 5. 用户显式 commit，生成 Reference Version R1，`ref_tree/HEAD = R1`。
 6. Agent 固定 R1，编辑并多次保存成品，然后执行 `commitDocument(referenceVersion: R1)` 生成 D1。
 7. 用户修改摘要并显式 commit 生成 R2；旧 D1 仍绑定 R1，Core 报告漂移。
 8. Agent 比较 R1 → R2，修改当前成品并显式 commit 生成 D2；`D2.parent = D1`、`D2.referenceVersion = R2`。
 9. `traceDocument(D2)` 能返回 D2 的 Document ancestry 与 R2；`traceReference(R1)` 能返回 Reference ancestry 与绑定 R1 的 Document Versions。
-10. 用户可以查看旧版本、checkout 到工作副本、从旧版本继续形成分叉，并导出当前或任意历史 Markdown。
+10. 用户可以查看旧版本、checkout 到工作副本、从旧版本继续形成分叉，并通过 `readContent` 取得当前或任意历史 Markdown。
 11. 并发 writer 使用旧 generation 保存或 commit 时得到冲突，不覆盖另一方的工作副本或版本。
 
 ## 16. 实施顺序
@@ -854,9 +1024,10 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 4. 实现 M2 公开只读 API：`parse/open`、工作副本读取、版本索引、trace 与 `readVersionBytes/Text`。
 5. 实现 M3 工作副本 Writer：`createMdv`、`saveReference`、`saveDocument`、generation CAS 和原子替换。
 6. 已实现 M4 `commitReference`、`commitDocument` 和 checkout。
-7. 实现 M5 Diff、Reference 漂移、`verify` 与 `exportMarkdown`。
-8. 实现内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
-9. 用真实复杂 Markdown 和资源 sidecar 完成 M6 发布收口，再启动独立 VS Code extension；MarkText adapter 后续接入。
+7. 已实现 M5 `getStatus`、`readContent`、源文本 Diff 与顶层 `verifyMdv`；只复用现有 Reader/Core，不改格式或写事务。
+8. 实现 M5.5 内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
+9. 完成 M6 fixtures、fuzz、安全、复杂 Markdown 往返、性能、CI、包发布与兼容承诺收口。
+10. Core 0.1 收口后启动独立 VS Code extension；首个宿主验证稳定后再接入 MarkText adapter，CLI/Agent tool 保持独立上游立项。
 
 第一步不是在任何编辑器的扩展名白名单中加入 `.mdv`。只有格式、fixtures 和 Core 先形成独立边界，MDV 才不会变成只能由单一编辑器理解的私有文件。
 

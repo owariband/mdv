@@ -1,3 +1,5 @@
+import type { MdvErrorCode, MdvErrorDetails } from './errors.js'
+
 export const MDV_FORMAT = 'mdv' as const
 export const MDV_FORMAT_VERSION = '0.1' as const
 
@@ -113,6 +115,110 @@ export interface DocumentTrace {
   readonly reference: ReferenceVersionSummary | null
 }
 
+export interface TreeWorkingCopyStatus {
+  readonly head: VersionId | null
+  readonly dirty: boolean
+}
+
+export type ReferenceRelation =
+  | { readonly kind: 'no-document-head' }
+  | { readonly kind: 'unbound' }
+  | {
+      readonly kind: 'aligned'
+      readonly referenceVersion: VersionId
+    }
+  | {
+      readonly kind: 'drifted'
+      readonly boundReference: VersionId
+      readonly currentReference: VersionId | null
+    }
+
+export interface DocumentStatus {
+  readonly reference: TreeWorkingCopyStatus
+  readonly document: TreeWorkingCopyStatus
+  readonly referenceRelation: ReferenceRelation
+}
+
+export type ContentSpec =
+  | {
+      readonly tree: TreeKind
+      readonly kind: 'working-copy'
+    }
+  | {
+      readonly tree: TreeKind
+      readonly kind: 'version'
+      readonly version: VersionId
+    }
+
+export interface DiffLimits {
+  readonly maxInputBytes: number
+  readonly maxInputLines: number
+  readonly maxEditLength: number
+  readonly maxHunks: number
+  readonly maxOutputBytes: number
+}
+
+export interface DiffOptions {
+  readonly contextLines?: number
+  readonly limits?: Partial<DiffLimits>
+}
+
+export type DiffLine =
+  | {
+      readonly kind: 'context'
+      readonly oldLine: number
+      readonly newLine: number
+      readonly text: string
+    }
+  | {
+      readonly kind: 'deletion'
+      readonly oldLine: number
+      readonly newLine: null
+      readonly text: string
+    }
+  | {
+      readonly kind: 'addition'
+      readonly oldLine: null
+      readonly newLine: number
+      readonly text: string
+    }
+
+export interface DiffHunk {
+  readonly oldStart: number
+  readonly oldLines: number
+  readonly newStart: number
+  readonly newLines: number
+  readonly lines: readonly DiffLine[]
+}
+
+export interface DiffResult {
+  readonly hunks: readonly DiffHunk[]
+  readonly unifiedText: string
+}
+
+export type VerifyMode = 'metadata' | 'full'
+
+export interface VerifyOptions extends OpenOptions {
+  readonly mode?: VerifyMode
+  readonly maxIssues?: number
+}
+
+export interface VerifyIssue {
+  readonly code: MdvErrorCode
+  readonly message: string
+  readonly entry?: string
+  readonly path?: string
+  readonly details: MdvErrorDetails
+}
+
+export interface VerifyReport {
+  readonly mode: VerifyMode
+  readonly valid: boolean
+  readonly complete: boolean
+  readonly issues: readonly VerifyIssue[]
+  readonly warnings: readonly MdvWarning[]
+}
+
 export interface ReferenceTrace {
   readonly reference: ReferenceVersionSummary
   readonly ancestry: readonly ReferenceVersionSummary[]
@@ -141,6 +247,9 @@ export interface DocumentSnapshot {
   traceDocument(document: VersionId): DocumentTrace
   traceReference(reference: VersionId): ReferenceTrace
 
+  getStatus(): Promise<DocumentStatus>
+  readContent(source: ContentSpec): Promise<MarkdownSource>
+  diff(from: ContentSpec, to: ContentSpec, options?: DiffOptions): Promise<DiffResult>
   readReference(): Promise<MarkdownSource>
   readDocument(): Promise<MarkdownSource>
   readReferenceText(): Promise<string>

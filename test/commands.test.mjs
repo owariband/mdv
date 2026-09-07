@@ -194,6 +194,23 @@ test('checkout permits a clean working copy and reports whether changes were dis
   })
 })
 
+test('checkout treats a HEAD byte-length mismatch as dirty even when its hash matches', () => {
+  const content = bytes('# R1\n')
+  const metadata = reference(R1, null, content)
+  const latest = state({
+    referenceHead: R1,
+    references: new Map([
+      [R1, { ...metadata, contentBytes: metadata.contentBytes + 1 }],
+      [R2, reference(R2, R1, bytes('# R2\n'))],
+    ]),
+  })
+
+  assert.throws(
+    () => planCheckout({ state: latest, tree: 'reference', version: R2, workingCopy: content }),
+    WorkingCopyDirtyError,
+  )
+})
+
 test('checkout refuses a dirty working copy unless discarding is explicit', () => {
   const headContent = bytes('# R1\n')
   const latest = state({

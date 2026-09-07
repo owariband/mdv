@@ -1,6 +1,6 @@
 export { MdvError } from './errors.js'
 export type { MdvErrorCode, MdvErrorDetails } from './errors.js'
-export { createMdv, openMdv, parseMdv } from './mdv-document.js'
+export { createMdv, openMdv, parseMdv, verifyMdv } from './mdv-document.js'
 export {
   MDV_FORMAT,
   MDV_FORMAT_VERSION,
@@ -11,9 +11,16 @@ export type {
   CommitDocumentInput,
   CommitInput,
   CommitResult,
+  ContentSpec,
   CreateOptions,
+  DiffHunk,
+  DiffLimits,
+  DiffLine,
+  DiffOptions,
+  DiffResult,
   DocumentId,
   DocumentSnapshot,
+  DocumentStatus,
   DocumentTrace,
   DocumentVersionSummary,
   MarkdownSource,
@@ -23,11 +30,17 @@ export type {
   OpenOptions,
   ParseOptions,
   ReadLimits,
+  ReferenceRelation,
   ReferenceTrace,
   ReferenceVersionSummary,
   SaveInput,
   TreeKind,
+  TreeWorkingCopyStatus,
   TreeSummary,
+  VerifyIssue,
+  VerifyMode,
+  VerifyOptions,
+  VerifyReport,
   VersionId,
   VersionQuery,
   VersionSummary,

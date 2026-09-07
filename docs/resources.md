@@ -77,9 +77,9 @@ Core 不扫描 Markdown AST，不自动下载网络 URL，也不会重写任意�
 
 ## 当前实现状态
 
-当前 Core 已经提供正确的 `baseDirectory` 以及工作副本 save、commit 和 checkout，但尚未发布资源 import/resolve/read API。宿主目前可以读取、保存和版本化 Markdown 中已有的相对路径，不能把自行实现的 sidecar 写入逻辑当作稳定 Core 契约。
+当前 Core 已经提供正确的 `baseDirectory` 以及工作副本 save、commit 和 checkout，但尚未发布资源 import/resolve/read API；这些能力已排入 M5.5。宿主目前可以读取、保存和版本化 Markdown 中已有的相对路径，不能把自行实现的 sidecar 写入逻辑当作稳定 Core 契约。
 
-资源写入所需的本地文件事务前置已经具备，具体 API 仍作为后续独立能力实现。当前规范性约定见 [Format 0.1：Relative resources](../spec/format-0.1.md#12-relative-resources)。
+M3 已验证可复用的本地安全写入原则，但 sidecar 会使用独立的文件原子发布流程，不能与 `.mdv` 整包替换伪装成一个跨文件事务。具体 API 在 M5.5 实现；当前规范性约定见 [Format 0.1：Relative resources](../spec/format-0.1.md#12-relative-resources)。
 
 ## 可移植性与历史限制
 

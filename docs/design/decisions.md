@@ -75,3 +75,15 @@
 - 决定：commit 不接收 Markdown，只固化已保存的 `current.md`；第一次显式空 commit 创建根 Version；已有 Head 后 no-changes 不创建 Version，但成功事务仍让 generation 增加 1。checkout 默认拒绝覆盖 dirty 工作副本，只有显式 `discardChanges: true` 才能替换 `current.md`。
 - 理由：版本操作必须建立在已经持久化、可进行 CAS 的工作副本上；显式 commit 表达用户保存版本的意图，而 checkout 不能静默丢弃已经保存的普通 Markdown。
 - 影响：宿主在 commit 前负责 save 内存 buffer；`CommitResult.created` 只说明是否创建 Version，不说明事务是否成功；宿主处理 dirty checkout 冲突时必须让用户选择先 commit 或明确丢弃。
+
+## D010：M5 提供 Agent-friendly 的通用只读原语
+
+- 日期：2026-09-07
+- 状态：Accepted
+- 决定：M5 在现有只读快照上增加异步 status、统一 `ContentSpec` 内容选择、源码级 diff 和顶层 `verifyMdv`。这些能力主要由 Agent/自动化调用需求驱动，但保持为与具体 Agent 协议无关的通用 Core API；不修改 Format 0.1，不增加新的写事务，也不解析或渲染 Markdown。
+- 状态语义：Document 与 Reference 的当前关系使用 `no-document-head`、`unbound`、`aligned`、`drifted` 四态联合类型表达，不用 `null` 同时承载多种含义；两棵树各自的 dirty 由 `current.md` 的 byte length / SHA-256 与对应 HEAD metadata 比较，不提前读取历史正文。
+- 读取与比较语义：`readContent(ContentSpec)` 和 `diff(from, to)` 共享同一种来源选择器，可明确选择任一树的工作副本或历史 Version；diff 面向原始 Markdown 行，保留正文语义，不经过 AST round-trip。
+- 诊断语义：`verifyMdv(source)` 是无需先成功 `openMdv` 的 package-root 入口，可以在安全边界内聚合报告损坏归档的问题，并用 `complete` 区分完整扫描与提前停止；普通 `openMdv` / `parseMdv` 继续 fail-fast。
+- 人类宿主边界：Reference/Document 左右对照依赖 Document Version 的精确 bind、trace 与内容读取，这些属于 Core；双栏布局、同步滚动、高亮、Markdown 渲染和 Review 交互属于 VS Code/MarkText。M5 对普通人的直接价值较小，也不代表 Core 提供 Review UI。
+- 理由：Agent/CLI 需要无歧义地回答“当前改了什么、成品依赖哪个摘要、任意两份正文差什么、包为何打不开”。由 Core 统一这些确定性计算，可以复用 bind、hash、错误码和 Archive 安全边界，避免每个 Agent tool 产生不同实现；但 Core 不增加 Agent 专属 DTO、prompt 或 token 裁剪策略。
+- 影响：M5 主要修改 public types、facade、纯 Core 计算和 Archive 诊断读取；`mutation.ts`、`writer.ts` 与 `transaction.ts` 不改，`commands.ts` 只允许为 dirty 规则一致性做机械修正。最终 checkout 补上 `contentBytes` 比较，与 status 的长度 + SHA-256 规则一致，没有新增 command 或改变公开事务语义。基础人类读写和 bind 左右对照不以 M5 为前置；受管图片 sidecar 独立在 M5.5 实现，发布兼容性在 M6 收口。

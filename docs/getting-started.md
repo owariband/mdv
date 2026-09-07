@@ -1,6 +1,6 @@
 # 快速开始
 
-本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的当前 API 创建、打开、保存、commit 和 checkout 一个 `.mdv` 文件。
+本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的当前 API 创建、打开、保存、commit、checkout、比较和诊断一个 `.mdv` 文件。
 
 ## 环境要求
 
@@ -182,6 +182,39 @@ if (head !== null) {
 
 版本列表只包含轻量元数据。调用 `readVersionBytes(id)` 或 `readVersionText(id)` 时，Core 才按需读取并校验该历史正文。
 
+## 查看状态并比较任意两份内容
+
+```ts
+const status = await mdv.getStatus()
+console.log(status.document.dirty, status.referenceRelation)
+
+const documentHead = mdv.documentTree.head
+if (documentHead !== null) {
+  const current = await mdv.readContent({
+    tree: 'document',
+    kind: 'working-copy',
+  })
+  const changes = await mdv.diff(
+    { tree: 'document', kind: 'version', version: documentHead },
+    { tree: 'document', kind: 'working-copy' },
+  )
+  console.log(current.origin, changes.unifiedText)
+}
+```
+
+`diff()` 并不限定为 Reference ↔ Document；两端都是同一个 `ContentSpec`，所以 Document ↔ Document、Reference ↔ Reference、跨树以及工作副本 ↔ Version 都成立。它保留 Markdown 源码的行结束符和空白，并用资源上限避免无界计算。
+
+如果文件无法正常打开，或者需要检查所有未被访问的历史分支，直接使用顶层诊断入口：
+
+```ts
+import { verifyMdv } from '@mdv/core'
+
+const report = await verifyMdv('/documents/example.mdv', { mode: 'full' })
+console.log(report.valid, report.complete, report.issues)
+```
+
+`metadata` 是默认模式；`full` 额外遍历全部历史正文并检查 UTF-8、长度与 SHA-256。诊断只读，不会自动修复文件。
+
 ## 处理并发冲突
 
 `expectedGeneration` 是显式的比较后交换条件。两个 writer 从同一 generation 保存时，最多一个提交；另一个得到 `MdvError` 的 `CONFLICT`：
@@ -223,4 +256,4 @@ editor.setMarkdown(new TextDecoder().decode(source.bytes), {
 - 阅读[核心概念](./concepts.md)理解 Reference、Document 和 bind；
 - 阅读[API 参考](./api-reference.md)查看当前可用契约；
 - 阅读[图片与相对资源](./resources.md)处理图片路径；
-- commit/checkout 的实现与验收范围见[开发路线图](./design/roadmap.md)；调用方始终通过 package-root API 操作，不直接修改 ZIP entry。
+- 后续资源与发布计划见[开发路线图](./design/roadmap.md)；调用方始终通过 package-root API 操作，不直接修改 ZIP entry。

@@ -6,7 +6,7 @@
 
 MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@mdv/core` 是它的 TypeScript 参考实现。
 
-> 当前状态：开发预览。M4 已完成：当前 package root 已支持创建、读取、工作副本保存、commit、checkout 和历史 trace；正式 npm 发布尚未完成。
+> 当前状态：开发预览。M5 已完成：当前 package root 已支持创建、读取、保存、commit、checkout、历史 trace、结构化 status、任意内容选择与 Diff，以及完整性诊断；受管图片资源和正式 npm 发布尚未完成。
 
 ## 为什么使用 MDV
 
@@ -39,15 +39,26 @@ document = committed.document
 const reopened = await openMdv('/documents/example.mdv')
 console.log(await reopened.readDocumentText())
 
-if (reopened.documentTree.head !== null) {
-  const trace = reopened.traceDocument(reopened.documentTree.head)
+const documentHead = reopened.documentTree.head
+if (documentHead !== null) {
+  const trace = reopened.traceDocument(documentHead)
   console.log(trace.reference)
+
+  const review = await reopened.diff(
+    { tree: 'document', kind: 'version', version: documentHead },
+    { tree: 'document', kind: 'working-copy' },
+  )
+  console.log(review.unifiedText)
 }
+
+console.log(await reopened.getStatus())
 ```
 
 当前已支持创建空 MDV、从文件或内存打开、保存两份工作副本、显式提交不可变版本、checkout 历史版本、读取历史正文、查询两棵版本树并追踪 bind。普通 save 只更新目标 `current.md` 并递增 generation，不创建 Version、也不移动 HEAD。多个进程同时编辑时，Core 通过 generation CAS 报告 `CONFLICT`，由 VS Code、MarkText 或其他宿主决定重载、比较或合并，就像处理普通 Markdown 被外部修改一样。
 
 M4 沿用普通 Markdown 编辑底座，没有引入 `DraftVersion`、`workspace` 或 pending bind。commit 只固化已经 save 的 `current.md`；Document bind 只属于 commit 后的不可变 Document Version。checkout 默认拒绝覆盖 dirty 工作副本，只有显式 `discardChanges: true` 才允许丢弃它。
+
+M5 增加的是通用、只读、Agent-friendly 原语：`getStatus()` 报告两棵工作副本与 bind 漂移，`readContent()` 精确选择任意工作副本或历史 Version，`diff()` 可以比较包括 Document ↔ Document 在内的任意两份来源，顶层 `verifyMdv()` 可诊断无法正常 open 的损坏包。它们不包含 Markdown AST、渲染、Review UI 或 Agent 专属协议。
 
 ## 从源码使用
 

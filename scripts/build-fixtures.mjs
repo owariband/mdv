@@ -23,6 +23,7 @@ try {
 
   buildArchive('empty', 'valid', emptyEntries())
   buildArchive('unbound-document', 'valid', unboundDocumentEntries())
+  buildArchive('drifted-no-reference-head', 'valid', driftedNoReferenceHeadEntries())
   buildArchive('bound-history', 'valid', boundHistoryEntries())
   buildArchive('invalid-manifest', 'invalid', invalidManifestEntries())
   buildArchive('dangling-reference', 'invalid', danglingReferenceEntries())
@@ -68,6 +69,36 @@ function unboundDocumentEntries() {
 
 function danglingReferenceEntries() {
   return documentEntries(`v_${'2'.repeat(32)}`)
+}
+
+function driftedNoReferenceHeadEntries() {
+  const reference = `v_${'2'.repeat(32)}`
+  const document = `v_${'a'.repeat(32)}`
+  const referenceContent = Buffer.from('# Historical reference\n')
+  const documentContent = Buffer.from('# Bound document\n')
+  return {
+    'manifest.json': json(manifest(2)),
+    'ref_tree/current.md': Buffer.alloc(0),
+    'doc_tree/HEAD': Buffer.from(`${document}\n`),
+    'doc_tree/current.md': documentContent,
+    ...versionEntries(
+      'ref_tree',
+      reference,
+      null,
+      '2026-09-06T01:00:00Z',
+      'Historical reference without a current Head',
+      referenceContent,
+    ),
+    ...versionEntries(
+      'doc_tree',
+      document,
+      null,
+      '2026-09-06T02:00:00Z',
+      'Document bound to historical reference',
+      documentContent,
+      { referenceVersion: reference },
+    ),
+  }
 }
 
 function boundHistoryEntries() {

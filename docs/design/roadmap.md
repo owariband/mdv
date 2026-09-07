@@ -1,8 +1,8 @@
 # MDV Core 开发进度与路线图
 
-> 最后更新：2026-09-07
+> 最后更新：2026-09-08
 >
-> 当前里程碑：M4「Commit 与 Checkout」已完成；下一步为 M5「Review、状态与完整性能力」
+> 当前里程碑：M5「Agent-friendly 审阅与诊断能力」已完成；下一步为 M5.5「受管资源 sidecar」
 >
 > 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件
 >
@@ -38,14 +38,15 @@
 | --- | --- | --- | --- |
 | M0 格式与工程基线 | 完成 | Format 0.1、Schema、基础 fixtures、单包工程 | 后续仍需扩充一致性 fixtures |
 | M1 内部只读基础 | 完成 | ZIP Reader、严格 JSON/UTF-8、hydrate、版本图校验和基础索引查询 | 后续在 M6 扩充安全与 fuzz 矩阵 |
-| M2 公开只读 API | 完成 | package root 的 open/parse、只读 facade、查询、trace、bytes/text 和稳定错误映射 | 写能力留在 M3，状态与完整性能力留在 M5 |
+| M2 公开只读 API | 完成 | package root 的 open/parse、只读 facade、查询、trace、bytes/text 和稳定错误映射 | 写能力留在 M3；Agent-friendly 检查与诊断留在 M5 |
 | M3 创建、保存与文件事务 | 完成 | create/save、确定性 ZIP Writer、锁内双重 CAS、临时包全验、fsync 与原子替换 | Windows 目录项 crash durability 尚未达到 POSIX 同等级保证 |
-| M4 Commit 与 Checkout | 完成 | Core commands、有限 mutation、四个 package-root API、分叉与并发测试 | 后续状态、Diff、verify 与 export 留在 M5 |
-| M5 Review 与完整性能力 | 下一步 | Diff、drift、verify、export 契约已有设计，M4 版本操作前置已完成 | 实现与覆盖测试尚未开始 |
-| M6 稳定发布 | 未开始 | `prepare`、tarball consumer smoke 与调用方文档已建立 | 完整 fixtures、CI matrix、正式发布与兼容性承诺未完成 |
-| U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端，使用 Core 返回的 Markdown 与资源基准 | 按当前策略等待 Core 0.1 闭环完成后启动 |
+| M4 Commit 与 Checkout | 完成 | Core commands、有限 mutation、四个 package-root API、分叉与并发测试 | 后续 Agent-friendly status、Diff 与诊断 verify 留在 M5 |
+| M5 Agent-friendly 审阅与诊断 | 完成 | 结构化 status、统一 `ContentSpec`、bounded line Diff、metadata/full `verifyMdv` 与 package-root 测试 | 默认限制与诊断边界已记录；后续稳定兼容承诺留到 M6 |
+| M5.5 受管资源 sidecar | 未开始 | `baseDirectory`、documentId 和内容寻址约定已经明确 | import/resolve/read/verify API 与原子 sidecar 写入尚未实现 |
+| M6 稳定发布 | 未开始 | `prepare`、tarball consumer smoke 与调用方文档已建立 | 完整 fixtures、fuzz/性能、CI matrix、正式发布与兼容性承诺未完成 |
+| U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端；bind + 内容读取已经能支撑左右对照，具体 mode 属于 extension | M5 已完成；等待 M5.5 和 M6 形成 Core 0.1 稳定闭环 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
-| U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游 | 等待 public write API 稳定 |
+| U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游，M4 public write API 与 M5 Agent-friendly API 已可用 | 等待 M5.5 API 与 M6 错误码、诊断码兼容承诺稳定 |
 
 核心开发依赖顺序为：
 
@@ -55,13 +56,17 @@ M0 格式基线
   -> M2 公开只读 API
   -> M3 create/save 与原子事务
   -> M4 commit/checkout
-  -> M5 diff/drift/verify/export
+  -> M5 status/source diff/diagnostic verify
+  -> M5.5 图片 hash sidecar
   -> M6 发布与兼容性收口
 
 M2 完成 -> 上游已可只读打开，但暂不启动客户端开发
 M3 完成 -> Core 具备工作副本保存
-M4/M5 完成 -> Core 具备版本、Review 与 trace 闭环
-Core 0.1 闭环完成 -> 启动独立 VS Code extension，MarkText adapter 后续接入
+M4 完成 -> Core 具备显式版本与 trace 闭环
+M5 完成 -> Core 具备面向 Agent/自动化的结构化检查与归档诊断能力
+M5.5 完成 -> Core 具备 Markdown 图片受管 sidecar 闭环
+M6 完成 -> Core 0.1 达到稳定发布口径
+Core 0.1 稳定发布 -> 启动独立 VS Code extension，MarkText adapter 后续接入
 ```
 
 ## 3. 已完成阶段
@@ -126,7 +131,7 @@ M1 明确不包含：
 - `DocumentSnapshot` / `MdvDocument` facade；
 - `traceDocument`、`traceReference` 的公开组合结果；
 - dirty、unbound、Reference drift 状态；
-- `verify`、`exportMarkdown`、Diff；
+- status、统一内容选择器、Diff、顶层诊断 verify；
 - 任何 create、save、commit、checkout 或写事务。
 
 ## 4. Core 开发阶段
@@ -170,7 +175,7 @@ M1 明确不包含：
 - `listVersions` 按 RFC 3339 实际时刻升序排列，并以 Version ID 打破平局；`getHistory` 从起点沿 parent 返回到根；
 - literal tree 参数通过少量 overload 保留 Reference/Document 返回类型，不引入公开条件泛型；
 - `MdvWarning` 同时包含 ZIP entry 和 JSON path，能够定位具体版本元数据；
-- `DocumentStatus`、dirty、drift、`verify`、Diff 和 `export` 仍按计划留在 M5；未定义清楚的 `readVersion()` 不提前发布，由明确的 `readVersionBytes/Text()` 覆盖 M2 需求；
+- dirty、Document 与 Reference 的关系状态、Diff 和诊断 verify 仍按计划留在 M5；未定义清楚的 `readVersion()` 不提前发布，由明确的 `readVersionBytes/Text()` 覆盖 M2 需求，M5 再以统一内容选择器收口跨来源读取；
 - 修正路径不存在、普通 ZIP、损坏 ZIP、畸形 manifest 与未知格式版本的错误分类，并补上规范要求的 BOM 拒绝。
 - 新增 `bound-history`、`content-hash-mismatch`、`markdown-bom`、`unsupported-version` 和 `malformed-version` fixtures，并让 fixture 构建时间戳可重复。
 
@@ -325,38 +330,180 @@ interface MdvDocument {
 
 以上行为已有 Core command、package-root API、重开、分叉、输入错误、generation CAS 和真实跨进程竞争测试。当前完整测试数量以 `npm test` 输出为准。
 
-### M5：Review、状态与完整性能力
+### M5：Agent-friendly 审阅与诊断能力
 
-状态：**下一步**
+状态：**完成（2026-09-08）**
 
-目标：补齐版本查看、Review、漂移判断和完整性诊断，使 Core 达到“可读、可写、可追踪、可 Review”的 0.1 闭环。
+目标：在不修改 Archive 格式、不引入 Markdown AST 的前提下，为 Agent 与自动化调用方补齐结构化工作副本状态、Document 与 Reference 的关系状态、任意 Markdown 来源之间的受限源码 Diff，以及可用于损坏归档排障的顶层诊断入口。
 
-实现范围：
+M5 的主要驱动力是 **Agent-friendly**，不是人类编辑器缺少基础能力。M2–M4 已经提供 bind、trace、精确版本读取和写入操作；人类宿主据此就能把绑定的 Reference 与 Document 放在左右两侧。双栏布局、同步滚动、高亮、Markdown 渲染和 Review 交互属于 VS Code/MarkText 上游，不进入 Core。M5 对人类直接调用的价值有限，主要让 Agent/CLI 不必自行拼接状态、重复实现 Diff 或从首个异常猜测归档问题。
 
-- 计算 Reference/Document working copy dirty 状态；
-- 区分 unbound 与 Reference drift，不把 `referenceVersion: null` 当作错误或漂移；
-- 实现受资源上限约束的 Markdown 源文本逐行 Diff；
-- Diff 同时返回结构化 hunks 与 unified text；
-- 实现 `verify({ mode: 'metadata' | 'full' })`；
-- metadata 模式验证结构和关系，full 模式遍历并校验全部历史正文；
-- `verify` 尽量聚合相互独立的问题，普通读取仍在阻断错误处立即失败；
-- 实现当前工作副本和指定历史版本的 `exportMarkdown`；
-- 补齐查询过滤、结果排序和大小上限。
+这些能力仍放在 Core，是因为它们是与 UI、模型供应商和 Agent 协议无关的确定性纯操作，且需要复用 Core 的 bind、hash、错误码与 Archive 安全边界。Core 只返回通用结构化结果，不增加 Agent 专属 DTO、prompt、token 截断策略或 Review mode。
+
+M5 全部能力都是只读计算，不移动 HEAD、不增加 generation，也不修改工作副本或历史 Version。实现继续复用 M1 的索引和惰性正文读取、M2 的 facade 与错误映射，不新增 Writer、Repository、Provider 或第二种 storage abstraction。
+
+#### M5.1 工作副本状态
+
+已新增公开 status 结果，一次返回 Reference、Document 两个 working copy 的 dirty 状态：
+
+- 有 HEAD 时，只读取工作副本，计算 `byteLength` 与 SHA-256，并与已经 hydrate 的 HEAD metadata 比较；Markdown 格式、空白、CRLF、Unicode 和末尾换行的变化都属于修改；
+- 没有 HEAD 时，空工作副本为 clean，非空工作副本为 dirty；
+- status 不把宿主编辑器尚未 save 的内存 buffer 纳入判断；调用方必须先通过现有 save API 更新 `current.md`；
+- status 不读取 HEAD `content.md`，因此不破坏历史正文按需读取；HEAD 正文自身是否与 metadata 一致由普通版本读取或 `verifyMdv(source, { mode: 'full' })` 负责；
+- status 不为工作副本创建 Draft Version，也不改变 M4 已冻结的普通 Markdown 保存语义。
+
+每棵树返回统一的 `TreeWorkingCopyStatus { head: VersionId | null; dirty: boolean }`；冻结的 `DocumentStatus` 聚合 Reference、Document 两棵树状态和下节的 `referenceRelation`。计算需要读取包内两份工作副本，因此在 `DocumentSnapshot` 上提供异步 `getStatus(): Promise<DocumentStatus>`，不发布一个看似同步却隐含 I/O 的属性。
+
+#### M5.2 Document 与 Reference 的关系状态
+
+Document HEAD 与 Reference HEAD 的关系使用判别联合表达，避免用 `boolean | null` 混合“没有版本”“明确不绑定”和“发生漂移”：
+
+```ts
+type ReferenceRelation =
+  | { readonly kind: 'no-document-head' }
+  | { readonly kind: 'unbound' }
+  | {
+      readonly kind: 'aligned'
+      readonly referenceVersion: VersionId
+    }
+  | {
+      readonly kind: 'drifted'
+      readonly boundReference: VersionId
+      readonly currentReference: VersionId | null
+    }
+```
+
+- `no-document-head`：Document 尚无 HEAD；归档中即使存在未被 HEAD 指向的历史 Version，也不改变这个当前状态；
+- `unbound`：当前 Document Version 明确保存了 `referenceVersion: null`，这是合法状态；
+- `aligned`：Document 绑定的精确 Reference Version 等于 Reference HEAD；
+- `drifted`：Document 仍绑定某个合法历史 Reference Version，但 Reference HEAD 已经是另一个版本或 `null`。
+
+该状态只报告事实，不自动 checkout、commit 或重新绑定。Document 只有在调用方下一次显式 `commitDocument({ referenceVersion })` 时才产生新的 bind。
+
+`DocumentStatus.document.head` 已经给出当前 Document Version，因此 `ReferenceRelation` 不重复携带 `documentVersion`。这样每个分支只表达关系本身，同时仍能通过同一个 status 结果定位参与判断的 Document HEAD。
+
+#### M5.3 统一内容选择器与源码 Diff
+
+现有 `readReference*`、`readDocument*` 和 `readVersion*` 已经能取得原始 Markdown，不再增加含义重叠且无法表明树类型的 `exportMarkdown()`。M5 用一个明确的 `ContentSpec` 统一表示 Diff 两侧以及跨来源读取的目标：
+
+```ts
+type ContentSpec =
+  | {
+      readonly tree: TreeKind
+      readonly kind: 'working-copy'
+    }
+  | {
+      readonly tree: TreeKind
+      readonly kind: 'version'
+      readonly version: VersionId
+    }
+```
+
+已增加：
+
+- `readContent(ContentSpec)`：返回现有 `MarkdownSource`，作为统一 bytes 读取出口；
+- `diff(from: ContentSpec, to: ContentSpec, options?)`：比较任意合法工作副本或历史 Version；
+- 版本选择器必须同时校验 Version 存在且属于声明的 tree，不能依赖调用方猜测 Version 类型；
+- 保留 M2 已发布的 read 方法作为清晰的便捷入口，不做破坏式改名。
+
+Diff 是 Markdown **源码逐行 Diff**，不解析 AST、不渲染 HTML，也不推断“需求是否落实”。结果同时返回结构化 hunks 和 deterministic unified text；hunk 携带 old/new 起点与行数，其中的行区分 context、addition、deletion，以 `oldLine/newLine: number | null` 标明两侧行号，并保留原始行结束符。默认不忽略空白、CRLF/LF、Unicode 或末尾换行差异，也不自动格式化正文。
+
+结构化 Diff 主要用于 Agent 在没有可视化界面时获得有限、可定位的变化上下文。VS Code/MarkText 可以完全忽略它，直接把 bind 对应的两份 Markdown 交给自身的左右对照或原生 Diff UI；Core 的 Diff 不是人类展示协议。
+
+`DiffLimits` 明确包含 `maxInputBytes`、`maxInputLines`、`maxEditLength`、`maxHunks` 与 `maxOutputBytes`。其中 `maxInputLines` 限制两侧输入总行数，`maxEditLength` 限制差异算法允许探索的编辑距离，避免完全不同的大文本触发失控的时间或内存开销。任一上限超出都统一返回 `LIMIT_EXCEEDED`，不静默截断成看似完整的结果；`contextLines` 等选项必须校验为有限非负整数。
+
+最终实现默认 `contextLines = 3`、合计输入 8 MiB / 200,000 行、最大编辑距离 2,048、最多 10,000 个 hunk、unified text 最多 16 MiB。算法采用共同前后缀裁剪后的 bounded Myers；没有增加 runtime dependency，并通过随机小序列与 LCS 对照检查最短编辑数及双侧重建。
+
+#### M5.4 顶层完整性诊断
+
+已增加 package-root 顶层入口 `verifyMdv(pathOrBytes, { mode: 'metadata' | 'full' })`，而不是只在已经成功打开的 `DocumentSnapshot` 上增加 `verify()`。原因是待诊断的包可能损坏到 `openMdv()`/`parseMdv()` 无法构造 snapshot。
+
+- `metadata`（默认）：检查 ZIP 容器、固定条目、manifest、HEAD、Version metadata、ID、parent 图、Document bind、工作副本 UTF-8 以及现有资源上限；
+- `full`：包含 metadata 的全部检查，并遍历两棵树的每一个历史 `content.md`，验证严格 UTF-8、`contentBytes` 和 SHA-256；
+- 返回冻结的结构化报告，包含 `valid`、`mode`、`complete`、按稳定顺序排列的 issues 和 warnings；每个 issue 携带稳定 code、可选 entry/path、结构化 details 与消息，供 CLI、VS Code 和 Agent 定位；
+- `mode` 明确报告实际请求的检查深度；`complete: true` 只表示该模式要求的范围已经完整扫描，不表示归档合法，最终合法性仍由 `valid` 表达；
+- `valid` 只在请求 mode 完整执行且没有 issue 时为 `true`；warning 不影响 `valid`，因此不会出现 `complete: false, valid: true`；
+- `VerifyOptions.maxIssues` 是有限正整数硬上限；达到上限、资源限制阻断或上游结构错误导致剩余范围无法安全遍历时停止继续聚合并返回 `complete: false`，不能把部分报告伪装成完整报告；
+- 文件路径不存在、不可读或底层读取失败时，没有可供诊断的输入，顶层调用仍分别抛出 `NOT_FOUND` / `IO_ERROR`；只要输入 bytes 已可读取，其余容器、格式、metadata、图和正文诊断错误都进入 `VerifyReport.issues`，不再以首个诊断错误 reject Promise；
+- 在容器仍可安全遍历时，尽量聚合互不依赖的问题；遇到无法建立安全 entry 边界、资源上限超限等阻断错误时立即停止该分支，绝不为了“多报几个问题”绕过安全限制；
+- 普通 open/read 继续 fail-fast，诊断 API 不改变已有成功路径或 `MdvError` 契约；
+- verify 是纯只读操作，不提供自动修复，也不接受“忽略哈希”等降低完整性的开关。
+
+最终实现的 `maxIssues` 默认值为 100。metadata 阶段复用现有 Reader 的安全 fail-fast 边界；无法建立可信索引时返回阻断 issue 和 `complete: false`。成功建立索引后，图校验聚合关系问题，full 阶段通过一次 ZIP 扫描检查所有历史正文并聚合独立 UTF-8、长度与哈希问题。
+
+#### 实际代码落点
+
+M5 最终只增加以下职责，没有重排现有稳定模块：
+
+```text
+src/
+├── core/
+│   ├── status.ts       # dirty 与 ReferenceRelation 纯计算
+│   └── diff.ts         # 有上限的源码逐行 Diff
+├── archive/
+│   └── verify.ts       # 面向可疑归档的诊断扫描
+├── mdv-document.ts     # DocumentSnapshot facade 装配
+├── types.ts            # ContentSpec、status、Diff、verification public types
+└── index.ts            # 唯一 package-root export
+
+test/
+├── status.test.mjs
+├── diff.test.mjs
+├── verify.test.mjs
+└── m5-api.test.mjs
+```
+
+具体文件可以在实现审计时合并，但职责边界不变：纯状态与 Diff 规则属于 Core；不可信 ZIP 的尽力诊断属于 Archive；调用方只从 package root 使用。
 
 验收条件：
 
-- 工作副本与 HEAD 内容相同/不同的 dirty 判断正确；
-- 已绑定旧 Reference 的 Document HEAD 在 Reference HEAD 前进后报告 drift；
-- unbound Document 明确返回 unbound，不报告虚假 drift；
-- 任意合法工作副本/版本组合都能按 API 契约 Diff；
-- `verify(full)` 可以发现非首次访问版本中的长度或哈希损坏；
-- export 返回原始 Markdown bytes，不增加注释、front matter 或格式化变化。
+- 两棵树分别覆盖有 HEAD/无 HEAD、空/非空、bytes 相同/不同的 dirty 组合；status 不修改 generation 或任何文件；
+- `getStatus()` 保持异步且返回冻结结果；`no-document-head`、`unbound`、`aligned`、`drifted` 四个关系分支均有 package-root 黑盒测试，`null` bind 不被误报为 drift；
+- 任意合法 working-copy/version 同树或跨树组合都能通过 `ContentSpec` 读取和 Diff；missing/wrong-tree Version 有稳定错误；
+- Diff 覆盖空文本、中文、CRLF/LF、末尾换行、长行和二进制式非法 UTF-8，结构化 hunks 与 unified text 对同一变化保持一致；
+- Diff 输入 bytes、总行数、edit length、hunk 和输出上限都有边界测试，超限不返回部分结果；
+- `verifyMdv(source, { mode: 'metadata' })` 能报告结构/关系错误；`verifyMdv(source, { mode: 'full' })` 能发现一个从未被普通读取触发过的旧分支正文长度或哈希损坏；
+- verify issue 顺序和路径稳定，同一输入多次执行产生等价报告；`mode`、`valid` 和 `complete` 的组合有明确测试，`maxIssues` 达限返回不完整报告，诊断过程不会修改源文件；
+- 不存在或不可读 path 分别抛出 `NOT_FOUND` / `IO_ERROR`；已经读到 bytes 的坏 ZIP、坏 metadata、坏图和坏正文进入 report 而不是抛出首个诊断错误；
+- 外部 tarball consumer 只从 package root 完成 `open -> status -> readContent -> diff`，并可对无法 open 的包直接调用 `verifyMdv`。
+
+M5 完成只表示 Agent/自动化所需的通用审阅与诊断原语已经齐备；它不是人类 Review UI，也不是 Reference/Document 左右对照成立的前置条件。图片粘贴所需的受管资源和正式发布质量分别由 M5.5、M6 完成。
+
+### M5.5：受管图片 hash sidecar
+
+状态：**未开始**
+
+目标：落实已经冻结的外部内容寻址资源约定，让 VS Code、MarkText 等宿主无需各自复制图片存储规则。资源仍是普通 Markdown 相对路径，不进入 `.mdv` ZIP、不增加 manifest generation，也不纳入 Markdown Version 的正文哈希。
+
+实现范围：
+
+- 提供路径绑定 `MdvDocument` 的资源 import 能力：接收原始 bytes 与受支持的媒体/扩展名信息，计算小写十六进制 SHA-256；
+- 将资源原子创建或安全复用到 `.mdv-assets/<documentId>/<sha256>.<extension>`，返回可直接插入 Markdown 的 `./.mdv-assets/...` 相对路径；
+- 冻结最小媒体类型与扩展名 allowlist，拒绝路径分隔符、双扩展名欺骗和不匹配的媒体声明；
+- 同 hash 同扩展名且 bytes 一致时幂等复用；已存在路径内容不一致时报告完整性错误，绝不覆盖；
+- 提供 managed relative path 的 resolve、read 与 verify；只接受当前 documentId 下符合 grammar 的内容寻址路径，不把 API 退化成任意本地文件读取器；
+- 读取和复用时重新计算 hash，拒绝被替换、截断、symlink 绕过或超出资源大小上限的 sidecar；
+- 并发 import 使用 exclusive create/同目录临时文件与原子发布，失败时不留下可被误认为完整资源的目标文件；
+- `parseMdv(bytes)` 没有真实文件绑定时不提供写入；只有显式且可信的 `baseDirectory` 才能用于只读 resolve；
+- Core 不监听 paste/drop、不修改 Markdown、不扫描历史引用、不下载网络 URL、不渲染图片，0.1 也不自动垃圾回收孤立资源。
+
+资源文件和 `.mdv` ZIP 无法组成一个跨文件原子事务。宿主 paste 流程应先 import sidecar，再把返回路径插入 buffer 并调用 save；后续 save 失败最多留下可安全复用的孤立 hash 文件，不会产生正文引用一个半写资源的状态。
+
+验收条件：
+
+- 相同 bytes 重复或并发导入得到同一相对路径，目标内容 byte-for-byte 一致；
+- 不同 bytes 不会覆盖已有 hash path，伪造 hash、错误扩展名、路径穿越、绝对路径、symlink 与超限资源均被拒绝；
+- resolve/read 只在当前 documentId 的受管目录内工作，并在返回内容前完成 hash 校验；
+- sidecar import/read/verify 不修改 `.mdv` bytes、generation、HEAD 或版本历史；
+- 移动 `.mdv` 但遗漏 `.mdv-assets` 时得到明确 NOT_FOUND/diagnostic，而不是影响 Markdown 自身的读取和校验；
+- package-root 黑盒测试覆盖 `import -> Markdown save -> commit -> checkout old version -> resolve/read same hash resource`；
+- 宿主只负责 paste/drop 和插入 Core 返回的相对路径，不需要知道 sidecar 目录拼接或哈希算法。
 
 ### M6：一致性、性能与发布收口
 
 状态：**未开始**
 
-目标：把能运行的参考实现收口为其他项目可以稳定安装和升级的包。
+目标：把已经完成版本语义、Agent-friendly 检查与受管资源闭环的参考实现，收口为其他项目可以稳定安装、持续验证和安全升级的 Core 0.1 包。M6 原则上不再增加新的主要业务语义。
 
 实现范围：
 
@@ -364,20 +511,27 @@ interface MdvDocument {
 - 增加 Zip Slip、重复路径、NFC/大小写冲突、资源上限和损坏正文测试；
 - 增加 Archive/JSON fuzz 测试，保证任意输入不导致进程崩溃或无界资源使用；
 - 增加复杂 Markdown round-trip：CRLF、中文、front matter、代码块、表格、数学公式和 Mermaid；
-- 增加 `create -> save -> commit -> reopen -> trace -> verify -> export` 端到端测试；
+- 增加 `create -> save -> commit -> reopen -> status -> trace -> diff -> verify` 端到端测试；
+- 增加 `import asset -> save Markdown path -> commit -> checkout -> resolve/read/verify asset` 端到端测试；
 - 对真实历史规模做打开、按需读、整包重写的基准测试；
 - 随 API 演进维护现有 README、快速开始和 API 参考，并补齐最终发布示例；
 - 维护已经建立的 npm tarball/Git dependency `prepare` 构建生命周期；
 - 把已经通过的临时目录 tarball consumer smoke 固化进 CI matrix，持续验证 runtime import、类型声明和依赖完整；
 - 决定最终 npm 包名、scope 发布权限、License 和 0.1 版本策略；
-- 建立 CI，在支持的 Node.js 版本上执行 build、test 和 package smoke test。
+- 建立 CI，在支持的 Node.js 版本上执行 lint/typecheck、build、test 和 package smoke test；
+- 审计并冻结 package-root public API、错误码、资源限制默认值和诊断 issue code，补齐 0.1 升级/兼容策略；
+- 明确 POSIX 与 Windows 支持矩阵；Windows 目录 durability 若仍弱于 POSIX，必须有 CI 证据和公开限制，不以模糊的“跨平台”承诺代替。
 
 验收条件：
 
 - 新环境不依赖仓库中被忽略的本地 `dist/` 也能安装使用；
 - 调用方只需 `import ... from '@mdv/core'`，不需要了解源码目录；
 - public API、错误码和 Format 0.1 fixtures 有明确兼容承诺；
+- M5 status/diff/verify 与 M5.5 sidecar 在受支持平台上通过 package-root 端到端和 tarball consumer 测试；
+- CI 覆盖声明支持的 Node.js/操作系统矩阵，发布产物包含可用 ESM、类型声明、README、LICENSE 与必要 Schema/fixture 契约；
 - 性能测试证明当前整包重写方案满足 0.1 目标，或用数据推动下一格式版本，而不是提前引入增量容器。
+
+M6 完成后，可以称 `@mdv/core 0.1` 为本轮设计范围内的完整形态：普通 Markdown 双工作副本、两棵可追踪版本树、精确 bind、Agent-friendly 检查与诊断、外部图片 sidecar 都有稳定 package-root 能力。它不表示未来不再演进，也不把 VS Code extension、MarkText adapter、独立 CLI、浏览器后端或资源内嵌纳入 Core。
 
 ## 5. 上游接入阶段
 
@@ -385,13 +539,13 @@ interface MdvDocument {
 
 状态：**等待 Core 0.1 闭环**
 
-VS Code extension 是计划中的第一个图形客户端，但作为独立上游项目，不进入 `@mdv/core`。当前优先完成 M3 至 M6，不在 Core 尚未闭环时并行维护客户端兼容层。
+VS Code extension 是计划中的第一个图形客户端，但作为独立上游项目，不进入 `@mdv/core`。M5 已完成，当前优先依次完成 M5.5 和 M6，不在 Core 资源规则与发布承诺尚未闭环时并行维护客户端兼容层。
 
 未来接入遵守三个边界：
 
 1. extension 只依赖 `@mdv/core` package root，不读取或修改 ZIP entry；
-2. 当前 Reference/Document 通过虚拟 Markdown 文档接入原生编辑器，两者共享 `.mdv` 所在目录作为资源基准；
-3. 保存、commit、checkout、资源导入和冲突处理全部调用 Core，不在 extension 复制规则。
+2. extension 根据 Document Version 的精确 bind 分别读取 Reference/Document，并通过虚拟 Markdown 文档实现左右对照；两者共享 `.mdv` 所在目录作为资源基准；
+3. 左右布局、同步滚动、高亮与 Markdown 渲染属于 extension；保存、commit、checkout、资源导入和冲突处理调用 Core。extension 可以按需消费 Core status/Diff，也可以使用编辑器原生 Diff，但不能复制 bind、hash 或版本规则。
 
 ### U2：MarkText adapter
 
@@ -416,25 +570,36 @@ CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
 
 ## 6. 下一批开发任务
 
-下一批进入 M5，不同时启动 VS Code、MarkText 或 CLI：
+M5 已按 `public type -> 纯 Core 规则 -> facade -> Archive 诊断 -> package-root 验收` 完成交付。下一批只进入 M5.5，不同时启动 VS Code、MarkText 或 CLI：
 
-1. 在现有只读 snapshot 上实现 Reference/Document working-copy dirty 状态；
-2. 区分 unbound 与 Reference drift，不把 `referenceVersion: null` 当作漂移；
-3. 实现受读取上限约束的 Markdown 源文本逐行 Diff，并同时提供结构化 hunks 与 unified text；
-4. 实现 `verify({ mode: 'metadata' | 'full' })`，full 模式校验全部历史正文；
-5. 实现工作副本与指定历史版本的 `exportMarkdown`，保持原始字节；
-6. 复用现有索引、惰性正文读取和稳定错误边界，不引入 Markdown AST 或第二存储后端；
-7. 补齐 package-root API、限制条件、损坏历史、drift/diff/export 和端到端测试；
-8. 继续只发布一个 `@mdv/core`，不增加 Repository、Provider、Factory 或宿主专属 DTO。
+1. 先关闭 O002，冻结首批 MIME/扩展名 allowlist、真实内容识别策略、单资源大小上限和稳定错误分类；
+2. 冻结 package-root 的 `importResource`、`resolveResource`、`readResource`、`verifyResource` 最小 DTO，保持路径绑定写入与可选 baseDirectory 只读语义清楚分离；
+3. 实现 `.mdv-assets/<documentId>/<sha256>.<extension>` grammar、路径解析和 documentId 隔离，不接受任意相对/绝对文件读取；
+4. 实现 hash 校验、symlink/路径穿越防护、exclusive create 与同目录临时文件原子发布；
+5. 覆盖重复和并发导入、目标碰撞、错误媒体声明、移动包后资源缺失、读取时篡改与资源上限；
+6. 编写只从 package root 使用的资源闭环测试和官方文档，证明 sidecar 操作不修改 `.mdv` bytes、generation、Head 或历史；
+7. 继续只发布一个 `@mdv/core`，不增加 Markdown AST、paste/drop 监听、网络下载、资源 GC、CLI 或宿主专属 DTO。
 
-## 7. 暂不进入 0.1 的工作
+M5.5 开发前先审计其独立文件事务。资源 sidecar 与 `.mdv` 整包替换不是一个跨文件原子事务，不能直接复用 M3 transaction 后宣称两者一起提交；宿主仍按“先导入可复用 hash 资源，再 save Markdown 引用”的顺序编排。
+
+## 7. Core 0.1 完成口径
+
+M5 已关闭 Agent-friendly 检查层；剩余 M5.5 与 M6 分别关闭产品资源和稳定发布问题：
+
+- **M5 完成**：Agent-friendly 检查能力闭环。Agent/CLI 能读取结构化状态、识别 bind 关系、比较任意 Markdown 来源并诊断完整性；基础的人类读写和 bind 左右对照并不依赖 M5，但图片受管写入和发布承诺还未完成；
+- **M5.5 完成**：本轮产品能力闭环。Core 能安全导入、解析、读取和验证图片 hash sidecar，但仍是待硬化的预发布实现；
+- **M6 完成**：Core 0.1 稳定发布闭环。受支持平台、性能边界、错误/诊断码、package 产物和兼容策略都有自动化证据，此时才称本轮 `@mdv/core` 为完整形态。
+
+U1/U2/U3 不属于 Core 完成口径。M6 完成后它们可以只依赖 package root 开发，不需要等待 Core 仓库再增加 VS Code、Muya、CLI 或 Agent Runtime 类型。
+
+## 8. 暂不进入 0.1 的工作
 
 以下内容不应混入上述阶段：
 
 - Markdown AST、HTML 渲染或 Muya model 兼容层；
 - 通用 Repository、插件式 storage 和浏览器后端；
 - Named Ref、tag、branch name、merge commit、rebase、stage；
-- 附件打包和版本化；
+- 把附件/资源打进 ZIP、纳入 Version 哈希或自动垃圾回收；
 - 内容分块、去重和增量容器；
 - 语义 Diff、自动判断“要求是否落实”；
 - 数字签名和作者真实性证明；
@@ -442,7 +607,7 @@ CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
 
 这些能力只有在 0.1 闭环完成并出现真实需求或性能数据后，才单独进入后续格式或上游项目设计。
 
-## 8. 进度维护规则
+## 9. 进度维护规则
 
 每完成一个阶段，更新本文时必须同时记录：
 

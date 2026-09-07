@@ -18,11 +18,11 @@
 ## O002：受管资源的媒体类型与扩展名策略
 
 - 状态：Open
-- 所属阶段：M3 事务闭环之后
+- 所属阶段：M5.5
 - Owner：Core maintainer
 - 问题：允许哪些 MIME/扩展名、无扩展输入如何处理、扩展名与真实内容不一致时返回什么错误。
 - 已确认边界：路径必须内容寻址、不可覆盖、由 Core 校验；宿主只负责 paste/drop 和 Markdown 插入。
-- 下一检查：设计最小 `importResource` / `resolveResource` DTO 时冻结。
+- 下一检查：实现最小 `importResource` / `resolveResource` / `readResource` DTO 前冻结；该问题不阻塞 M5 的 Agent-friendly 只读检查与诊断能力。
 
 ## O003：稳定发布身份
 

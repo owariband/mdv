@@ -181,7 +181,8 @@ export function planCheckout(input: CheckoutPlanInput): CheckoutPlan {
   const workingCopySha256 = sha256(input.workingCopy)
   const dirty = head === null
     ? input.workingCopy.byteLength !== 0
-    : head.contentSha256 !== workingCopySha256
+    : head.contentBytes !== input.workingCopy.byteLength
+      || head.contentSha256 !== workingCopySha256
 
   if (dirty && input.discardChanges !== true) {
     throw new WorkingCopyDirtyError(input.tree)

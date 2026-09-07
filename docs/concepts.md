@@ -85,7 +85,7 @@ Reference Version 不保存反向列表。Core 在打开文档时扫描 Document
 - `getChildren()`：查看某个版本直接产生的分叉；
 - `traceDocument()` / `traceReference()`：组合 ancestry 与 bind 信息。
 
-Document 绑定的 Reference 可以落后于 Reference Head。后续状态 API 会把它报告为 drift，但 Reader 不会擅自更新旧 Document 的 bind。
+Document 绑定的 Reference 可以落后于 Reference Head。`getStatus()` 会把它报告为 `drifted`，但 Reader 不会擅自更新旧 Document 的 bind。
 
 ## Markdown 是保真边界
 

@@ -52,6 +52,11 @@ export interface ArchiveVersionEntry {
   readonly contentBytes: number
 }
 
+export interface ArchiveVersionContentVerification {
+  readonly complete: boolean
+  readonly errors: readonly ArchiveError[]
+}
+
 export interface OpenedArchive {
   readonly manifest: ManifestFileDto
   readonly referenceHead: string | null
@@ -65,6 +70,7 @@ export interface OpenedArchive {
   readWorkingCopy(tree: ArchiveTreeKind): Promise<Uint8Array>
   readVersionContent(tree: ArchiveTreeKind, versionId: string): Promise<Uint8Array>
   readVersionContents(): AsyncIterable<ArchiveVersionContent>
+  verifyVersionContents(maxIssues: number): Promise<ArchiveVersionContentVerification>
   close(): Promise<void>
 }
 
@@ -145,8 +151,24 @@ export async function openArchiveFromPath(
   return openArchive({ kind: 'path', path: resolve(path) }, resolveReadLimits(options.limits))
 }
 
-async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<OpenedArchive> {
+export async function openArchiveForVerificationFromPath(
+  path: string,
+  options: ArchiveReadOptions = {},
+): Promise<OpenedArchive> {
+  return openArchive(
+    { kind: 'path', path: resolve(path) },
+    resolveReadLimits(options.limits),
+    true,
+  )
+}
+
+async function openArchive(
+  source: ArchiveSource,
+  limits: ReadLimits,
+  retainInitialScan = false,
+): Promise<OpenedArchive> {
   const scanned = await scanEntries(source, limits)
+  let scanRetained = false
   try {
     const manifestEntry = requireManifestEntry(scanned.entries)
     const manifestBytes = await readEntryBytes(scanned.zip, manifestEntry, limits.maxJsonBytes)
@@ -202,7 +224,7 @@ async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<O
       limits.maxEntryBytes,
     )
 
-    return new IndexedArchive(
+    const archive = new IndexedArchive(
       source,
       limits,
       manifestDecoded.value,
@@ -228,9 +250,14 @@ async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<O
       manifestBytes,
       referenceWorkingCopy,
       documentWorkingCopy,
+      retainInitialScan ? scanned : null,
     )
+    scanRetained = retainInitialScan
+    return archive
   } finally {
-    await closeZip(scanned.zip, source.kind)
+    if (!scanRetained) {
+      await closeZip(scanned.zip, source.kind)
+    }
   }
 }
 
@@ -255,6 +282,7 @@ class IndexedArchive implements OpenedArchive {
     private readonly manifestBytes: Uint8Array,
     private readonly referenceWorkingCopy: Uint8Array,
     private readonly documentWorkingCopy: Uint8Array,
+    private readonly verificationScan: ScannedEntries | null,
   ) {
     this.referenceVersions = Object.freeze([...referenceVersions])
     this.documentVersions = Object.freeze([...documentVersions])
@@ -346,8 +374,111 @@ class IndexedArchive implements OpenedArchive {
     }
   }
 
+  async verifyVersionContents(maxIssues: number): Promise<ArchiveVersionContentVerification> {
+    if (!Number.isSafeInteger(maxIssues) || maxIssues < 0) {
+      throw new RangeError('maxIssues must be a non-negative safe integer')
+    }
+    if (this.versionEntries.length === 0) {
+      return freezeContentVerification(true, [])
+    }
+    if (maxIssues === 0) {
+      return freezeContentVerification(false, [])
+    }
+
+    let scanned = this.verificationScan
+    const closeAfterVerification = scanned === null
+    if (scanned === null) {
+      try {
+        scanned = await scanEntries(this.source, this.limits)
+      } catch (cause) {
+        if (cause instanceof ArchiveError) {
+          return freezeContentVerification(false, [cause])
+        }
+        throw cause
+      }
+    }
+
+    const errors: ArchiveError[] = []
+    let complete = true
+    try {
+      requireManifestEntry(scanned.entries)
+      validateArchiveLayout(scanned.entries)
+      requireEntry(scanned.entries, 'ref_tree/current.md')
+      requireEntry(scanned.entries, 'doc_tree/current.md')
+
+      const versions = [
+        ...this.documentVersions.map(({ directoryId, meta }) => ({
+          tree: 'document' as const,
+          directoryId,
+          meta,
+        })),
+        ...this.referenceVersions.map(({ directoryId, meta }) => ({
+          tree: 'reference' as const,
+          directoryId,
+          meta,
+        })),
+      ]
+
+      for (const version of versions) {
+        if (errors.length >= maxIssues) {
+          return freezeContentVerification(false, errors)
+        }
+
+        const treePath = version.tree === 'reference' ? 'ref_tree' : 'doc_tree'
+        const entryName = `${treePath}/versions/${version.directoryId}/content.md`
+        let bytes: Uint8Array
+        try {
+          bytes = await readEntryBytes(
+            scanned.zip,
+            requireEntry(scanned.entries, entryName),
+            this.limits.maxEntryBytes,
+          )
+        } catch (cause) {
+          if (!(cause instanceof ArchiveError)) {
+            throw cause
+          }
+          errors.push(cause)
+          complete = false
+          if (cause.code === 'LIMIT_EXCEEDED') {
+            return freezeContentVerification(false, errors)
+          }
+          continue
+        }
+
+        for (const error of inspectVersionContent(
+          bytes,
+          version.tree,
+          version.directoryId,
+          version.meta,
+          entryName,
+        )) {
+          if (errors.length >= maxIssues) {
+            return freezeContentVerification(false, errors)
+          }
+          errors.push(error)
+        }
+      }
+
+      return freezeContentVerification(complete, errors)
+    } catch (cause) {
+      if (!(cause instanceof ArchiveError)) {
+        throw cause
+      }
+      if (errors.length < maxIssues) {
+        errors.push(cause)
+      }
+      return freezeContentVerification(false, errors)
+    } finally {
+      if (closeAfterVerification) {
+        await closeZip(scanned.zip, this.source.kind)
+      }
+    }
+  }
+
   async close(): Promise<void> {
-    // Readers do not retain a file descriptor after indexing.
+    if (this.verificationScan !== null) {
+      await closeZip(this.verificationScan.zip, this.source.kind)
+    }
   }
 }
 
@@ -359,14 +490,42 @@ async function readVerifiedVersionContent(
   metadata: VersionMetaFileDto,
 ): Promise<Uint8Array> {
   const entryName = `${tree === 'reference' ? 'ref_tree' : 'doc_tree'}/versions/${versionId}/content.md`
-  const bytes = await readMarkdownEntry(
-    scanned,
+  const bytes = await readEntryBytes(
+    scanned.zip,
     requireEntry(scanned.entries, entryName),
     limits.maxEntryBytes,
   )
+  const [error] = inspectVersionContent(bytes, tree, versionId, metadata, entryName)
+  if (error !== undefined) {
+    throw error
+  }
+  return bytes
+}
+
+function inspectVersionContent(
+  bytes: Uint8Array,
+  tree: ArchiveTreeKind,
+  versionId: string,
+  metadata: VersionMetaFileDto,
+  entryName: string,
+): readonly ArchiveError[] {
+  const errors: ArchiveError[] = []
+  try {
+    validateMarkdownBytes(bytes, entryName)
+  } catch (cause) {
+    if (!(cause instanceof ArchiveError)) {
+      throw cause
+    }
+    errors.push(new ArchiveError(cause.code, cause.message, {
+      entry: entryName,
+      details: { ...cause.details, tree, versionId },
+      cause,
+    }))
+  }
+
   const actualHash = createHash('sha256').update(bytes).digest('hex')
   if (bytes.byteLength !== metadata.contentBytes || actualHash !== metadata.contentSha256) {
-    throw new ArchiveError(
+    errors.push(new ArchiveError(
       'INTEGRITY_MISMATCH',
       `Version content does not match metadata for ${versionId}`,
       {
@@ -380,9 +539,16 @@ async function readVerifiedVersionContent(
           actualContentSha256: actualHash,
         },
       },
-    )
+    ))
   }
-  return bytes
+  return errors
+}
+
+function freezeContentVerification(
+  complete: boolean,
+  errors: readonly ArchiveError[],
+): ArchiveVersionContentVerification {
+  return Object.freeze({ complete, errors: Object.freeze([...errors]) })
 }
 
 function locateWarnings(

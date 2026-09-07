@@ -19,6 +19,12 @@ import {
 import type { OpenedArchive } from './archive/reader.js'
 import { compareRfc3339 } from './archive/rfc3339.js'
 import { runArchiveTransaction } from './archive/transaction.js'
+import type { ArchiveDiagnostic } from './archive/verify.js'
+import {
+  verifyArchiveMetadataFromBytes,
+  verifyArchiveMetadataFromPath,
+  verifyArchiveVersionContents,
+} from './archive/verify.js'
 import {
   planCheckout,
   planDocumentCommit,
@@ -34,6 +40,7 @@ import type {
   ReferenceCommitPlan,
 } from './core/commands.js'
 import { hydrateArchiveIndex } from './core/hydrate.js'
+import { diffLines, DiffLimitExceededError } from './core/diff.js'
 import { brandVersionId } from './core/ids.js'
 import type { VersionId as CoreVersionId } from './core/ids.js'
 import { GraphValidationError } from './core/invariants.js'
@@ -48,6 +55,7 @@ import {
   getHistory as getCoreHistory,
   listDocumentsUsingReference as listCoreDocumentsUsingReference,
 } from './core/queries.js'
+import { computeDocumentStatus } from './core/status.js'
 import { MdvError } from './errors.js'
 import type {
   Actor,
@@ -55,9 +63,15 @@ import type {
   CommitDocumentInput,
   CommitInput,
   CommitResult,
+  ContentSpec,
   CreateOptions,
+  DiffHunk,
+  DiffLine,
+  DiffOptions,
+  DiffResult,
   DocumentId,
   DocumentSnapshot,
+  DocumentStatus,
   DocumentTrace,
   DocumentVersionSummary,
   MarkdownSource,
@@ -72,11 +86,16 @@ import type {
   VersionId,
   VersionQuery,
   VersionSummary,
+  VerifyIssue,
+  VerifyMode,
+  VerifyOptions,
+  VerifyReport,
 } from './types.js'
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const MARKDOWN_PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const VERSION_ID = /^v_[0-9a-f]{32}$/
+const DEFAULT_MAX_VERIFY_ISSUES = 100
 
 export async function parseMdv(
   bytes: Uint8Array,
@@ -146,6 +165,84 @@ export async function createMdv(
     }
     throw toMdvError(cause, `Failed to create MDV document ${packagePath}`)
   }
+}
+
+export async function verifyMdv(
+  source: string | Uint8Array,
+  options: VerifyOptions = {},
+): Promise<VerifyReport> {
+  const input = snapshotVerifyInput(source, options)
+  let metadata
+  try {
+    metadata = input.sourceKind === 'path'
+      ? await verifyArchiveMetadataFromPath(input.source, input.archiveOptions)
+      : await verifyArchiveMetadataFromBytes(input.source, input.archiveOptions)
+  } catch (cause) {
+    throw toMdvError(cause, 'Failed to read MDV document for verification')
+  }
+
+  const issues: VerifyIssue[] = []
+  let complete = metadata.complete
+  if (!appendArchiveDiagnostics(issues, metadata.issues, input.maxIssues)) {
+    complete = false
+  }
+
+  const archive = metadata.archive
+  if (archive !== null) {
+    try {
+      try {
+        hydrateOpenedArchive(archive)
+      } catch (cause) {
+        if (!(cause instanceof GraphValidationError)) {
+          throw cause
+        }
+        const remaining = input.maxIssues - issues.length
+        const selected = cause.issues.slice(0, remaining)
+        issues.push(...selected.map((issue): VerifyIssue => Object.freeze({
+          code: 'INVALID_GRAPH',
+          message: `${issue.path} ${issue.message}`,
+          path: issue.path,
+          details: Object.freeze({}),
+        })))
+        if (selected.length < cause.issues.length) {
+          complete = false
+        }
+      }
+
+      if (input.mode === 'full') {
+        const remaining = input.maxIssues - issues.length
+        if (remaining === 0 && archive.versionEntries.length > 0) {
+          complete = false
+        } else {
+          const content = await verifyArchiveVersionContents(archive, remaining)
+          const appendedAll = appendArchiveDiagnostics(issues, content.issues, input.maxIssues)
+          complete = complete && content.complete && appendedAll
+        }
+      }
+    } catch (cause) {
+      throw toMdvError(cause, 'Failed while verifying MDV document')
+    } finally {
+      try {
+        await archive.close()
+      } catch (cause) {
+        throw toMdvError(cause, 'Failed to close MDV document after verification')
+      }
+    }
+  }
+
+  const warnings = Object.freeze(metadata.warnings.map((warning): MdvWarning => Object.freeze({
+    code: warning.code,
+    entry: warning.entry,
+    path: warning.path,
+    message: warning.message,
+  })))
+  return Object.freeze({
+    mode: input.mode,
+    valid: complete && issues.length === 0,
+    complete,
+    issues: Object.freeze(issues),
+    warnings,
+  })
 }
 
 function createReadonlySnapshot(
@@ -333,6 +430,89 @@ class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentS
     return Object.freeze({ reference: summary, ancestry, usedByDocuments })
   }
 
+  async getStatus(): Promise<DocumentStatus> {
+    let referenceWorkingCopy: Uint8Array
+    let documentWorkingCopy: Uint8Array
+    try {
+      [referenceWorkingCopy, documentWorkingCopy] = await Promise.all([
+        this.#archive.readWorkingCopy('reference'),
+        this.#archive.readWorkingCopy('document'),
+      ])
+    } catch (cause) {
+      throw toMdvError(cause, 'Failed to read MDV working-copy status')
+    }
+
+    return toPublicDocumentStatus(computeDocumentStatus(
+      this.#state,
+      referenceWorkingCopy,
+      documentWorkingCopy,
+    ))
+  }
+
+  async readContent(source: ContentSpec): Promise<MarkdownSource> {
+    const selection = snapshotContentSpec(source, 'source')
+    if (selection.kind === 'working-copy') {
+      return this.#readWorkingCopy(selection.tree)
+    }
+
+    const id = this.#requireVersion(selection.tree, selection.version)
+    try {
+      const bytes = Uint8Array.from(await this.#archive.readVersionContent(
+        selection.tree,
+        selection.version,
+      ))
+      return Object.freeze({
+        bytes,
+        markdownProfile: this.manifest.markdownProfile,
+        baseDirectory: this.baseDirectory,
+        origin: Object.freeze({
+          tree: selection.tree,
+          kind: 'version' as const,
+          version: toPublicVersionId(id),
+        }),
+      })
+    } catch (cause) {
+      throw toMdvError(cause, `Failed to read ${selection.tree} version ${selection.version}`)
+    }
+  }
+
+  async diff(
+    from: ContentSpec,
+    to: ContentSpec,
+    options: DiffOptions = {},
+  ): Promise<DiffResult> {
+    const fromSelection = snapshotContentSpec(from, 'from')
+    const toSelection = snapshotContentSpec(to, 'to')
+    const diffOptions = copyDiffOptions(options)
+    const [oldSource, newSource] = await Promise.all([
+      this.readContent(fromSelection),
+      this.readContent(toSelection),
+    ])
+    const oldText = decodeUtf8(oldSource.bytes, { source: fromSelection })
+    const newText = decodeUtf8(newSource.bytes, { source: toSelection })
+
+    try {
+      return toPublicDiffResult(diffLines(oldText, newText, {
+        ...diffOptions,
+        oldLabel: contentSpecLabel(fromSelection),
+        newLabel: contentSpecLabel(toSelection),
+      }))
+    } catch (cause) {
+      if (cause instanceof DiffLimitExceededError) {
+        throw new MdvError('LIMIT_EXCEEDED', cause.message, {
+          details: {
+            reason: cause.reason,
+            limit: cause.limit,
+            maximum: cause.maximum,
+            observed: cause.observed,
+          },
+          cause,
+        })
+      }
+      throw cause
+    }
+  }
+
   async readReference(): Promise<MarkdownSource> {
     return this.#readWorkingCopy('reference')
   }
@@ -393,11 +573,14 @@ class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentS
 
   #requireVersion(tree: TreeKind, version: VersionId): CoreVersionId {
     const id = toCoreVersionId(version)
-    const exists = tree === 'reference'
-      ? this.#referenceById.has(id)
-      : this.#documentById.has(id)
-    if (!exists) {
-      throw versionNotFound(version, tree)
+    const ownVersions = tree === 'reference' ? this.#referenceById : this.#documentById
+    if (!ownVersions.has(id)) {
+      const otherVersions = tree === 'reference' ? this.#documentById : this.#referenceById
+      throw versionNotFound(
+        version,
+        tree,
+        otherVersions.has(id) ? 'wrong-tree' : 'missing',
+      )
     }
     return id
   }
@@ -827,6 +1010,294 @@ function copyOpenOptions(options: OpenOptions): OpenOptions {
     : { limits: Object.freeze({ ...options.limits }) })
 }
 
+type VerifyInput =
+  | {
+      readonly sourceKind: 'path'
+      readonly source: string
+      readonly mode: VerifyMode
+      readonly maxIssues: number
+      readonly archiveOptions: OpenOptions
+    }
+  | {
+      readonly sourceKind: 'bytes'
+      readonly source: Uint8Array
+      readonly mode: VerifyMode
+      readonly maxIssues: number
+      readonly archiveOptions: OpenOptions
+    }
+
+function snapshotVerifyInput(
+  source: string | Uint8Array,
+  options: VerifyOptions,
+): VerifyInput {
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('Verify options must be an object')
+  }
+  const requestedMode = options.mode
+  const requestedMaxIssues = options.maxIssues
+  const requestedLimits = options.limits
+  const mode = requestedMode ?? 'metadata'
+  if (mode !== 'metadata' && mode !== 'full') {
+    throw new TypeError('mode must equal "metadata" or "full"')
+  }
+  const maxIssues = requestedMaxIssues ?? DEFAULT_MAX_VERIFY_ISSUES
+  if (!Number.isSafeInteger(maxIssues) || maxIssues <= 0) {
+    throw new RangeError('maxIssues must be a positive safe integer')
+  }
+  if (
+    requestedLimits !== undefined
+    && (requestedLimits === null
+      || typeof requestedLimits !== 'object'
+      || Array.isArray(requestedLimits))
+  ) {
+    throw new TypeError('Verify read limits must be an object')
+  }
+  if (requestedLimits !== undefined) {
+    resolveReadLimits(requestedLimits)
+  }
+  const archiveOptions = Object.freeze(requestedLimits === undefined
+    ? {}
+    : { limits: Object.freeze({ ...requestedLimits }) })
+
+  if (typeof source === 'string') {
+    return Object.freeze({ sourceKind: 'path', source, mode, maxIssues, archiveOptions })
+  }
+  if (source instanceof Uint8Array) {
+    return Object.freeze({
+      sourceKind: 'bytes',
+      source: Uint8Array.from(source),
+      mode,
+      maxIssues,
+      archiveOptions,
+    })
+  }
+  throw new TypeError('source must be a file path or Uint8Array')
+}
+
+function appendArchiveDiagnostics(
+  target: VerifyIssue[],
+  diagnostics: readonly ArchiveDiagnostic[],
+  maxIssues: number,
+): boolean {
+  for (const diagnostic of diagnostics) {
+    const nestedIssues = readNestedDiagnosticIssues(diagnostic.details)
+    if (nestedIssues.length === 0) {
+      if (target.length >= maxIssues) {
+        return false
+      }
+      target.push(toVerifyIssue(diagnostic))
+      continue
+    }
+    for (const nested of nestedIssues) {
+      if (target.length >= maxIssues) {
+        return false
+      }
+      target.push(toVerifyIssue(diagnostic, nested))
+    }
+  }
+  return true
+}
+
+function toVerifyIssue(
+  diagnostic: ArchiveDiagnostic,
+  nested?: { readonly path: string; readonly message: string },
+): VerifyIssue {
+  return Object.freeze({
+    code: diagnostic.code,
+    message: nested?.message ?? diagnostic.message,
+    ...(diagnostic.entry === undefined ? {} : { entry: diagnostic.entry }),
+    ...(nested === undefined ? {} : { path: nested.path }),
+    details: freezeDetails(diagnostic.details),
+  })
+}
+
+function readNestedDiagnosticIssues(
+  details: Readonly<Record<string, unknown>>,
+): readonly { readonly path: string; readonly message: string }[] {
+  if (!Array.isArray(details.issues)) {
+    return Object.freeze([])
+  }
+  const issues: { readonly path: string; readonly message: string }[] = []
+  for (const candidate of details.issues) {
+    if (
+      candidate === null
+      || typeof candidate !== 'object'
+      || typeof (candidate as { readonly path?: unknown }).path !== 'string'
+      || typeof (candidate as { readonly message?: unknown }).message !== 'string'
+    ) {
+      return Object.freeze([])
+    }
+    const issue = candidate as { readonly path: string; readonly message: string }
+    issues.push(Object.freeze({ path: issue.path, message: issue.message }))
+  }
+  return Object.freeze(issues)
+}
+
+function freezeDetails(
+  details: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze(Object.fromEntries(
+    Object.entries(details).map(([name, value]) => [name, freezeDetailValue(value)]),
+  ))
+}
+
+function freezeDetailValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(freezeDetailValue))
+  }
+  if (value !== null && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype === Object.prototype || prototype === null) {
+      return Object.freeze(Object.fromEntries(
+        Object.entries(value).map(([name, nested]) => [name, freezeDetailValue(nested)]),
+      ))
+    }
+  }
+  return value
+}
+
+function snapshotContentSpec(source: ContentSpec, name: string): ContentSpec {
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) {
+    throw new TypeError(`${name} must be a ContentSpec object`)
+  }
+  const tree = source.tree
+  const kind = source.kind
+  if (tree !== 'reference' && tree !== 'document') {
+    throw new TypeError(`${name}.tree must equal "reference" or "document"`)
+  }
+  if (kind === 'working-copy') {
+    return Object.freeze({ tree, kind: 'working-copy' })
+  }
+  if (kind !== 'version') {
+    throw new TypeError(`${name}.kind must equal "working-copy" or "version"`)
+  }
+  const version = source.version
+  if (!isVersionId(version)) {
+    throw new TypeError(`${name}.version must be a valid Version ID`)
+  }
+  return Object.freeze({
+    tree,
+    kind: 'version',
+    version,
+  })
+}
+
+function copyDiffOptions(options: DiffOptions): DiffOptions {
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('Diff options must be an object')
+  }
+  const contextLines = options.contextLines
+  const limits = options.limits
+  if (
+    limits !== undefined
+    && (limits === null
+      || typeof limits !== 'object'
+      || Array.isArray(limits))
+  ) {
+    throw new TypeError('Diff limits must be an object')
+  }
+  if (contextLines !== undefined) {
+    validateNonNegativeSafeInteger(contextLines, 'contextLines')
+  }
+  if (limits !== undefined) {
+    for (const name of [
+      'maxInputBytes',
+      'maxInputLines',
+      'maxEditLength',
+      'maxHunks',
+      'maxOutputBytes',
+    ] as const) {
+      const value = limits[name]
+      if (value !== undefined) {
+        validateNonNegativeSafeInteger(value, `limits.${name}`)
+      }
+    }
+  }
+  return Object.freeze({
+    ...(contextLines === undefined ? {} : { contextLines }),
+    ...(limits === undefined
+      ? {}
+      : { limits: Object.freeze({ ...limits }) }),
+  })
+}
+
+function validateNonNegativeSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer`)
+  }
+}
+
+function contentSpecLabel(source: ContentSpec): string {
+  return source.kind === 'working-copy'
+    ? `${source.tree}:working-copy`
+    : `${source.tree}:${source.version}`
+}
+
+function toPublicDocumentStatus(
+  status: ReturnType<typeof computeDocumentStatus>,
+): DocumentStatus {
+  const referenceRelation = status.referenceRelation.kind === 'no-document-head'
+    ? Object.freeze({ kind: 'no-document-head' as const })
+    : status.referenceRelation.kind === 'unbound'
+      ? Object.freeze({ kind: 'unbound' as const })
+      : status.referenceRelation.kind === 'aligned'
+        ? Object.freeze({
+            kind: 'aligned' as const,
+            referenceVersion: status.referenceRelation.referenceVersion as VersionId,
+          })
+        : Object.freeze({
+            kind: 'drifted' as const,
+            boundReference: status.referenceRelation.boundReference as VersionId,
+            currentReference: toPublicVersionId(status.referenceRelation.currentReference),
+          })
+
+  return Object.freeze({
+    reference: Object.freeze({
+      head: toPublicVersionId(status.reference.head),
+      dirty: status.reference.dirty,
+    }),
+    document: Object.freeze({
+      head: toPublicVersionId(status.document.head),
+      dirty: status.document.dirty,
+    }),
+    referenceRelation,
+  })
+}
+
+function toPublicDiffResult(result: ReturnType<typeof diffLines>): DiffResult {
+  const hunks = result.hunks.map((hunk): DiffHunk => Object.freeze({
+    oldStart: hunk.oldStart,
+    oldLines: hunk.oldLines,
+    newStart: hunk.newStart,
+    newLines: hunk.newLines,
+    lines: Object.freeze(hunk.lines.map((line): DiffLine => {
+      if (line.kind === 'context') {
+        return Object.freeze({
+          kind: 'context',
+          oldLine: line.oldLine,
+          newLine: line.newLine,
+          text: line.text,
+        })
+      }
+      if (line.kind === 'deletion') {
+        return Object.freeze({
+          kind: 'deletion',
+          oldLine: line.oldLine,
+          newLine: null,
+          text: line.text,
+        })
+      }
+      return Object.freeze({
+        kind: 'addition',
+        oldLine: null,
+        newLine: line.newLine,
+        text: line.text,
+      })
+    })),
+  }))
+  return Object.freeze({ hunks: Object.freeze(hunks), unifiedText: result.unifiedText })
+}
+
 function normalizeMarkdownProfile(value: string | undefined): string {
   if (value === undefined) {
     return 'gfm'
@@ -1045,11 +1516,16 @@ function decodeUtf8(bytes: Uint8Array, details: Readonly<Record<string, unknown>
   }
 }
 
-function versionNotFound(versionId: VersionId, tree?: TreeKind): MdvError {
+function versionNotFound(
+  versionId: VersionId,
+  tree?: TreeKind,
+  reason?: 'missing' | 'wrong-tree',
+): MdvError {
   return new MdvError('NOT_FOUND', `Unknown${tree === undefined ? '' : ` ${tree}`} version ${versionId}`, {
     details: {
       versionId,
       ...(tree === undefined ? {} : { tree }),
+      ...(reason === undefined ? {} : { reason }),
     },
   })
 }

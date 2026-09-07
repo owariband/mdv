@@ -1,6 +1,6 @@
 # 当前 API 参考
 
-本页只记录当前从 `@mdv/core` package root 导出的公开 API。M4 已提供创建、读取、工作副本保存、commit 和 checkout；尚未从 package root 导出的公开 dirty/drift、diff、verify、export 和资源 API 不属于当前契约。
+本页只记录当前从 `@mdv/core` package root 导出的公开 API。M5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff 和完整性诊断；受管资源与正式发布能力仍属于后续阶段。
 
 ## 运行环境与入口
 
@@ -17,6 +17,7 @@ import {
   createMdv,
   openMdv,
   parseMdv,
+  verifyMdv,
 } from '@mdv/core'
 ```
 
@@ -193,6 +194,148 @@ interface MarkdownSource {
 
 `readReference()` 和 `readDocument()` 的 `origin.kind` 为 `working-copy`。历史接口当前直接返回 bytes/text。
 
+## 状态与统一内容选择
+
+### `getStatus()`
+
+```ts
+const status = await document.getStatus()
+```
+
+该方法一次返回两棵工作副本相对各自 Head 的 dirty 状态，以及当前 Document Head 与 Reference Head 的精确关系：
+
+```ts
+interface TreeWorkingCopyStatus {
+  readonly head: VersionId | null
+  readonly dirty: boolean
+}
+
+type ReferenceRelation =
+  | { readonly kind: 'no-document-head' }
+  | { readonly kind: 'unbound' }
+  | { readonly kind: 'aligned'; readonly referenceVersion: VersionId }
+  | {
+      readonly kind: 'drifted'
+      readonly boundReference: VersionId
+      readonly currentReference: VersionId | null
+    }
+
+interface DocumentStatus {
+  readonly reference: TreeWorkingCopyStatus
+  readonly document: TreeWorkingCopyStatus
+  readonly referenceRelation: ReferenceRelation
+}
+```
+
+有 Head 时，dirty 由 `current.md` 原始字节的长度和 SHA-256 与 Head metadata 同时比较；无 Head 时，空工作副本为 clean，非空为 dirty。该查询只反映当前 snapshot 已保存的工作副本，不包含编辑器尚未 save 的内存 buffer，也不读取 Head 历史正文。
+
+`unbound` 表示 Document Head 明确绑定 `null`，不是错误；`drifted` 表示 Document 仍精确绑定一个历史 Reference，而当前 Reference Head 已经不同或为 `null`。查询只报告事实，不自动修改 bind。
+
+### `readContent(source)`
+
+```ts
+type ContentSpec =
+  | { readonly tree: 'reference' | 'document'; readonly kind: 'working-copy' }
+  | {
+      readonly tree: 'reference' | 'document'
+      readonly kind: 'version'
+      readonly version: VersionId
+    }
+
+const source = await document.readContent({
+  tree: 'document',
+  kind: 'version',
+  version: documentVersion,
+})
+```
+
+`readContent` 是工作副本和历史版本共用的 `MarkdownSource` 读取入口。它不会猜测 Version 属于哪棵树；声明的 `tree` 与实际版本不一致时返回 `NOT_FOUND`，`details.reason` 为 `wrong-tree`。原有 `readReference*`、`readDocument*` 和 `readVersion*` 继续保留为便利接口。
+
+## 通用 Markdown 源码 Diff
+
+```ts
+const result = await document.diff(
+  { tree: 'document', kind: 'version', version: oldDocument },
+  { tree: 'document', kind: 'version', version: newDocument },
+  { contextLines: 3 },
+)
+```
+
+Diff 两端使用同一种 `ContentSpec`，所以支持 Document ↔ Document、Reference ↔ Reference、Reference ↔ Document，以及任意工作副本 ↔ 历史版本。它比较 Markdown 原始文本行，不解析 AST、不渲染 HTML，也不推断需求是否满足。
+
+```ts
+interface DiffResult {
+  readonly hunks: readonly DiffHunk[]
+  readonly unifiedText: string
+}
+
+interface DiffHunk {
+  readonly oldStart: number
+  readonly oldLines: number
+  readonly newStart: number
+  readonly newLines: number
+  readonly lines: readonly DiffLine[]
+}
+
+type DiffLine =
+  | { readonly kind: 'context'; readonly oldLine: number; readonly newLine: number; readonly text: string }
+  | { readonly kind: 'deletion'; readonly oldLine: number; readonly newLine: null; readonly text: string }
+  | { readonly kind: 'addition'; readonly oldLine: null; readonly newLine: number; readonly text: string }
+```
+
+`text` 保留 CRLF、LF、CR、空白、Unicode 表达和末尾换行；相同输入返回空 hunks 和空 `unifiedText`。有差异时，unified header 使用稳定的 `<tree>:working-copy` 或 `<tree>:<version-id>` 标签，缺少末尾换行会生成标准 marker。返回值只用于描述差异，不包含 patch/apply 能力。
+
+默认 `contextLines` 为 3。Diff 使用有编辑距离上限的逐行 Myers 算法，不依赖第三方运行时包；以下限制可通过 `options.limits` 局部覆盖：
+
+| 字段 | 默认值 | 计量方式 |
+| --- | ---: | --- |
+| `maxInputBytes` | 8 MiB | 两端 UTF-8 bytes 总和 |
+| `maxInputLines` | 200,000 | 两端行数总和 |
+| `maxEditLength` | 2,048 | 最大编辑距离 |
+| `maxHunks` | 10,000 | 输出 hunk 数 |
+| `maxOutputBytes` | 16 MiB | `unifiedText` UTF-8 bytes |
+
+任何限制超出都会整体抛出 `MdvError` 的 `LIMIT_EXCEEDED`，不返回截断结果；`details` 包含 `limit`、`maximum` 和 `observed`。
+
+## 完整性诊断
+
+`verifyMdv` 是 package-root 顶层函数，不要求先成功 `openMdv`：
+
+```ts
+const report = await verifyMdv('/documents/example.mdv', {
+  mode: 'full',
+  maxIssues: 100,
+})
+```
+
+```ts
+type VerifyMode = 'metadata' | 'full'
+
+interface VerifyReport {
+  readonly mode: VerifyMode
+  readonly valid: boolean
+  readonly complete: boolean
+  readonly issues: readonly VerifyIssue[]
+  readonly warnings: readonly MdvWarning[]
+}
+
+interface VerifyIssue {
+  readonly code: MdvErrorCode
+  readonly message: string
+  readonly entry?: string
+  readonly path?: string
+  readonly details: MdvErrorDetails
+}
+```
+
+- `metadata` 是默认模式，检查 ZIP 安全边界、固定布局、manifest、工作副本、Head、全部版本 metadata 和 parent/bind 图，但不读取历史正文；
+- `full` 在此基础上用一次归档扫描检查所有历史正文，包括不在当前 Head ancestry 中的分支，并验证 UTF-8、字节长度和 SHA-256；
+- `complete` 只表示请求范围是否完整检查，不代表内容有效；`valid` 仅在 `complete === true` 且没有 issue 时为 `true`；
+- `maxIssues` 默认为 100，必须是正安全整数。达到上限且仍有内容未检查时，报告以 `complete: false` 明确标记；
+- warning 不影响 `valid`；报告、issue、warning 和 details 都是冻结快照；
+- 路径不存在或无法读取时仍分别抛 `NOT_FOUND` / `IO_ERROR`。一旦输入 bytes 可读，其余格式、图和正文问题进入报告；普通 open/read 继续保持 fail-fast；
+- 诊断是纯只读操作，不获取 writer lock、不改变 generation/Head/工作副本，也不提供自动修复或忽略哈希选项。
+
 ## 保存工作副本
 
 ```ts
@@ -366,7 +509,6 @@ if (result.created) {
 
 ## 当前未提供
 
-- 公开 dirty/drift、diff、verify、export；
 - 受管资源 import/resolve/read API；
 - Markdown parser、AST 或 renderer。
 

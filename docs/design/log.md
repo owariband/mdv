@@ -2,6 +2,14 @@
 
 本文件只追加简短索引；具体结论写入对应设计页面。
 
+## 2026-09-08
+
+- 完成 M5：从 package root 提供 `getStatus()`、`readContent(ContentSpec)`、通用 `diff()` 与顶层 `verifyMdv()`，并导出全部 readonly public types。
+- status 以原始 bytes 长度/SHA-256 判断两棵工作副本 dirty，用四态联合精确区分无 Document Head、unbound、aligned 与 drifted；新增 Reference Head 为 `null` 的合法 drift fixture。
+- Diff 采用无第三方依赖的 bounded Myers，支持任意两份工作副本/Version 的同树或跨树比较，保留 CRLF/LF/CR、Unicode 和 EOF newline，并对输入、行数、编辑距离、hunk 和输出实施硬上限。
+- `verifyMdv` 默认检查 metadata，full 模式通过单次 ZIP 扫描验证全部历史正文并聚合独立 UTF-8、长度与哈希问题；阻断结构、资源限制和 issue budget 截断通过 `complete: false` 表达。
+- M5 没有修改 Format 0.1、Writer、mutation、transaction 或 runtime dependencies；人类左右对照仍由 bind/trace/read + 上游 UI 组合。下一阶段进入 M5.5 受管图片 sidecar。
+
 ## 2026-09-07
 
 - 将维护者资料整理到 `docs/design/`，建立架构、机制、路线图、决策和开放问题导航。
@@ -20,3 +28,6 @@
 - 完成 M4：从 package root 公开 `commitReference`、`commitDocument`、`checkoutReference` 和 `checkoutDocument`，并导出对应 input/result 类型。
 - commit 在事务锁内读取已保存工作副本，创建不可变完整快照并更新 Head；Document commit 显式保存精确 Reference bind 或 `null`，no-changes 仍递增 generation。
 - checkout 默认保护 dirty 工作副本，显式 discard 后可恢复历史正文并移动 Head；分叉、错误树/缺失版本、同 generation 并发提交和跨进程冲突已有测试覆盖。当前完整测试数量以 `npm test` 输出为准。
+- 新增 [`dev_log.md`](./dev_log.md)，按真实 commit 沉淀 M1–M4 的详细交付正文、验证结果和阶段边界；本文件继续只维护设计知识根的简短变更索引，不重写已经推送的 Git 历史。
+- 冻结 M5 为主要由 Agent-friendly 需求驱动的通用只读能力：异步 status、四态 Reference 关系、统一 `ContentSpec`、受限源码 Diff 与无需先成功 open 的顶层 `verifyMdv`；人类左右对照继续由 bind/read + 上游 UI 实现，并移除重复且含糊的 `exportMarkdown` 草案。
+- 补齐剩余阶段边界：M5.5 落实内容寻址图片 sidecar，M6 负责 fixtures、fuzz、性能、CI、发布身份与兼容性；M6 完成后才达到 Core 0.1 稳定发布口径。
