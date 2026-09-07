@@ -2,9 +2,24 @@
   "name": "@mdv/core",
   "version": "0.0.0-development",
   "description": "Reference TypeScript library for Markdown Document with Versions (.mdv)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/owariband/mdv.git"
+  },
+  "bugs": {
+    "url": "https://github.com/owariband/mdv/issues"
+  },
+  "homepage": "https://github.com/owariband/mdv#readme",
+  "keywords": [
+    "markdown",
+    "versioning",
+    "document-format"
+  ],
   "type": "module",
   "files": [
     "dist",
+    "docs/**/*.md",
+    "docs/assets/mdv-icon.svg",
     "schemas",
     "spec"
   ],

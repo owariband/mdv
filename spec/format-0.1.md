@@ -2,9 +2,9 @@
 
 Status: frozen implementation baseline for the 0.1 reference implementation.
 
-This document is normative for the physical `.mdv` format. Product behavior and
-the TypeScript API are described separately in `docs/design.md` and
-`docs/technical_solution.md`.
+This document is normative for the physical `.mdv` format. Current TypeScript
+usage is documented in `docs/api-reference.md`; product behavior and future
+implementation design live under `docs/design/`.
 
 The key words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are to be
 interpreted as requirement levels.
@@ -223,3 +223,17 @@ MDV 0.1 does not embed or version attachments. Relative links and images in any
 Markdown body are resolved against the directory containing the `.mdv` file.
 Moving the MDV file without its external resources may break those references.
 
+The reference managed-resource convention stores imported local resources as
+content-addressed sidecar files relative to that directory:
+
+```text
+.mdv-assets/<documentId>/<sha256>.<extension>
+```
+
+The Markdown body records that relative hash path directly. MDV 0.1 does not
+store a second mutable path-to-hash map in `manifest.json`. A managed resource
+file's `<sha256>` is the 64-character lower-case hexadecimal SHA-256 of its raw
+bytes. The file is immutable: an existing hash path may be reused after its bytes
+have been verified, but it must not be overwritten with different bytes. These
+sidecar bytes are not ZIP entries, do not affect `generation`, and are not
+included in a Version's `contentSha256` or `contentBytes`.

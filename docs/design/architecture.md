@@ -1,10 +1,12 @@
-# MDV Core 设计（Draft 0.4）
+# MDV Core 架构与产品设计（Draft 0.5）
 
 > 状态：设计草案
 >
 > 范围：`.mdv` 开放格式及其 TypeScript 解析/写入库
 >
-> 不在范围：MarkText 的具体 UI、Muya 的 Markdown 解析与渲染实现
+> 不在范围：VS Code / MarkText 的具体 UI，以及 Markdown 解析与渲染实现
+>
+> 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 
 ## 1. 背景与目标
 
@@ -16,7 +18,7 @@ MDV（Markdown Document with Versions）是一种带版本语义的 Markdown 文
 - 每个成品版本实际依据的精确摘要版本，或明确记录该版本没有摘要依赖；
 - 随时可打开或导出的当前 Markdown 成品。
 
-本项目首先实现独立的 `@mdv/core`。它是 `.mdv` 的官方 TypeScript 参考实现，但不是格式本身的唯一事实来源。语言无关规范、一致性样例和 Schema 与 Core 同级；MarkText 只是 Core 的第一个图形客户端。
+本项目首先完成独立的 `@mdv/core`。它是 `.mdv` 的官方 TypeScript 参考实现，但不是格式本身的唯一事实来源。语言无关规范、一致性样例和 Schema 与 Core 同级；Core 0.1 闭环完成后，VS Code extension 作为第一个图形客户端，MarkText adapter 后续接入。
 
 ### 1.1 核心语义
 
@@ -76,7 +78,7 @@ doc_tree/current.md（可变成品工作副本）
 | 历史结构 | 两条单父版本历史；允许从旧版本继续，不支持 merge | 满足回看和恢复，同时控制复杂度 |
 | 版本关联 | Document Version 绑定一个精确 Reference Version，或显式为 `null` | 支持可追溯的摘要驱动文档，也允许退化为普通带版本 Markdown |
 | 正文存储 | 每个 commit 保存完整 Markdown 快照 | 易恢复、易校验；Diff 按需计算 |
-| 附件 | 0.1 不打包、不版本化 | 先证明正文和版本闭环 |
+| 受管资源 | 0.1 使用外部内容寻址 sidecar，不打包、不纳入版本哈希 | 保持 Markdown 相对路径可读，同时避免可变映射 |
 
 ## 3. 领域模型
 
@@ -284,11 +286,20 @@ Document Version 的 `referenceVersion` 可以落后于 `ref_tree/HEAD`。这是
 - 条目可使用 Store 或 Deflate；ZIP 时间戳不是协议语义，不参与版本排序和哈希。
 - Writer 输出确定的条目顺序；Reader 不依赖 ZIP 条目顺序。
 
-### 4.6 相对链接与附件
+### 4.6 相对链接与受管资源
 
 0.1 不将附件写入包内。Markdown 中的相对链接和图片地址以 `.mdv` 文件所在目录作为基准，而不是以 ZIP 内路径为基准。`export` 只导出 Markdown，不隐式复制外部附件。
 
-这是 0.1 的明确限制：移动或分享 `.mdv` 时，外部附件可能丢失。附件内容寻址和版本化在正文闭环稳定后单独设计。
+官方 Core 将提供外部受管资源能力。导入的图片等资源使用内容寻址 sidecar：
+
+```text
+example.mdv
+.mdv-assets/<documentId>/<sha256>.<extension>
+```
+
+Markdown 直接记录相对路径 `./.mdv-assets/<documentId>/<sha256>.<extension>`。路径本身就是不可变内容引用，不在 manifest 中重复维护可变的 `path -> hash` 映射。Core 负责资源导入、相对路径解析、读取与 SHA-256 校验；宿主负责 paste/drop、把返回的相对路径插入 Markdown，以及最终渲染。Core 不扫描或解释 Markdown AST。
+
+资源仍不进入 `.mdv` ZIP，也不计入 Version 的正文哈希。相同 hash 文件只复用、不覆盖，0.1 不自动垃圾回收。只要 sidecar 仍存在，旧版本正文中的 hash 路径即可解析到原资源；单独移动或分享 `.mdv` 仍可能丢失资源。把资源内嵌并纳入版本完整性属于后续格式版本。
 
 ## 5. Reader 与 Validator
 
@@ -348,7 +359,7 @@ interface ReadLimits {
 ```ts
 export function parseMdv(
   bytes: Uint8Array,
-  options?: OpenOptions,
+  options?: ParseOptions,
 ): Promise<DocumentSnapshot>
 
 export function openMdv(
@@ -378,19 +389,33 @@ interface MarkdownSource {
   }
 }
 
+interface MdvWarning {
+  readonly code: 'UNKNOWN_FIELD' | 'UNKNOWN_MARKDOWN_PROFILE'
+  readonly entry: string
+  readonly path: string
+  readonly message: string
+}
+
 interface DocumentSnapshot {
   readonly manifest: Manifest
   readonly packagePath: string | null
   readonly baseDirectory: string | null
-  readonly referenceTree: { head: VersionId | null }
-  readonly documentTree: { head: VersionId | null }
+  readonly referenceTree: { readonly head: VersionId | null }
+  readonly documentTree: { readonly head: VersionId | null }
+  readonly warnings: readonly MdvWarning[]
   readonly status: DocumentStatus
 
+  listVersions(query: { readonly tree: 'reference' }): readonly ReferenceVersionSummary[]
+  listVersions(query: { readonly tree: 'document' }): readonly DocumentVersionSummary[]
   listVersions(query?: VersionQuery): readonly VersionSummary[]
+  getHistory(tree: 'reference', from?: VersionId): readonly ReferenceVersionSummary[]
+  getHistory(tree: 'document', from?: VersionId): readonly DocumentVersionSummary[]
   getHistory(tree: TreeKind, from?: VersionId): readonly VersionSummary[]
+  getChildren(tree: 'reference', version: VersionId): readonly ReferenceVersionSummary[]
+  getChildren(tree: 'document', version: VersionId): readonly DocumentVersionSummary[]
   getChildren(tree: TreeKind, version: VersionId): readonly VersionSummary[]
   getDocumentReference(document: VersionId): VersionId | null
-  listDocumentsUsingReference(reference: VersionId): readonly VersionSummary[]
+  listDocumentsUsingReference(reference: VersionId): readonly DocumentVersionSummary[]
   traceDocument(document: VersionId): DocumentTrace
   traceReference(reference: VersionId): ReferenceTrace
   readReference(): Promise<MarkdownSource>
@@ -410,6 +435,7 @@ interface DocumentSnapshot {
 约定：
 
 - `listVersions` 只返回轻量元数据，不返回正文。
+- `listVersions`、`getChildren` 和反向 bind 结果按 RFC 3339 实际时刻升序排列，以 Version ID 打破平局；`getHistory` 从指定版本或 Head 沿 parent 返回到根。
 - `getHistory`、`traceDocument` 和 `traceReference` 只遍历打开时建立的 parent/bind 索引；历史正文仍按需读取。
 - `listDocumentsUsingReference` 从 Document Version 的单向 bind 建立反向内存索引，不向 Reference Version 写回数据。
 - `readReference` 和 `readDocument` 分别读取 `ref_tree/current.md` 与 `doc_tree/current.md`，同时返回 profile、资源基准目录和来源描述。
@@ -636,15 +662,27 @@ Reader 将 `.mdv` 当作不可信归档处理：
 
 ## 12. 包与模块边界
 
-具体模块职责和模型映射见 [`technical_solution.md`](./technical_solution.md)。项目采用单个 `@mdv/core` 包，不使用 monorepo，也不把内部职责拆成多个 npm package：
+具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。项目采用单个 `@mdv/core` 包，不使用 monorepo，也不把内部职责拆成多个 npm package：
 
 ```text
 mdv/
 ├── package.json
 ├── tsconfig.json
 ├── docs/
-│   ├── design.md
-│   └── technical_solution.md
+│   ├── README.md
+│   ├── getting-started.md
+│   ├── concepts.md
+│   ├── api-reference.md
+│   ├── resources.md
+│   ├── assets/
+│   └── design/
+│       ├── index.md
+│       ├── architecture.md
+│       ├── mechanisms.md
+│       ├── roadmap.md
+│       ├── decisions.md
+│       ├── open-questions.md
+│       └── log.md
 ├── spec/
 │   └── format-0.1.md
 ├── schemas/
@@ -676,20 +714,20 @@ mdv/
 
 当前只有一个实现时不增加 `Manager`、`Service`、`Repository`、public factory 或只有一层转调的接口。真正需要浏览器存储或第二种后端后，再从已存在的 I/O 边界提取最小接口。
 
-MarkText 的依赖方向必须保持：
+所有图形客户端的依赖方向必须保持：
 
 ```text
-MarkText UI / Muya -> MDV adapter -> @mdv/core -> .mdv
+VS Code / MarkText -> host adapter -> @mdv/core -> .mdv
 ```
 
-Core 不依赖 Electron、Vue、MarkText store、Muya state 或 Muya AST。MarkText adapter 从 Core 取得 UTF-8 字符串后交给 Muya，并把 Muya 导出的 Markdown 字符串交回保存 API。
+Core 不依赖 VS Code API、Electron、Vue、MarkText store、Muya state 或 Muya AST。宿主 adapter 从 Core 取得 UTF-8 字符串与资源基准，并把编辑后的 Markdown 字符串交回保存 API。
 
 ## 13. 宿主与 Agent 接入
 
-`@mdv/core` 是被宿主进程 import 的库，不启动 HTTP 服务、后台 daemon 或 CLI 进程。MarkText 等应用直接调用 public API：
+`@mdv/core` 是被宿主进程 import 的库，不启动 HTTP 服务、后台 daemon 或 CLI 进程。VS Code、MarkText 等应用通过各自 adapter 调用 public API：
 
 ```text
-MarkText UI / Muya -> MarkText adapter -> @mdv/core -> example.mdv
+host UI / editor -> host adapter -> @mdv/core -> example.mdv
 ```
 
 Agent 本身也不直接触碰磁盘。模型发出工具调用，由 Agent Runtime 中注册的工具执行真正的文件操作：
@@ -742,7 +780,7 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 12. `save -> commit -> reopen -> verify(full) -> export` 端到端测试。
 13. 后续 Python 只读实现运行同一套 fixtures，证明格式未绑定 TypeScript。
 
-Muya 的 `Markdown -> State -> Markdown` 稳定性属于 MarkText adapter 的集成测试。Core 只保证交给它的 Markdown 字节不会被自己改写。
+宿主编辑器的 `Markdown -> editor state -> Markdown` 稳定性属于对应 adapter 的集成测试。Core 只保证交给它的 Markdown 字节不会被自己改写。
 
 ## 15. 最小闭环验收
 
@@ -768,14 +806,14 @@ Muya 的 `Markdown -> State -> Markdown` 稳定性属于 MarkText adapter 的集
 4. 实现工作副本 Writer：`saveReference`、`saveDocument`、generation CAS 和原子替换。
 5. 实现 `commitReference`、`commitDocument` 和 checkout。
 6. 实现 Diff 和 Reference 漂移。
-7. 用真实复杂 Markdown 验证 Core 字节保真，再接 MarkText adapter。
-8. MarkText 先接打开、普通保存、显式 commit、冲突和导出，最后增加双历史树、Diff 和 Agent UI。
+7. 实现内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
+8. 用真实复杂 Markdown 和资源 sidecar 验证 Core 闭环，再启动独立 VS Code extension；MarkText adapter 后续接入。
 
-第一步不是在 MarkText 的扩展名白名单中加入 `.mdv`。只有格式、fixtures 和 Core 先形成独立边界，MDV 才不会变成只能由单一编辑器理解的私有文件。
+第一步不是在任何编辑器的扩展名白名单中加入 `.mdv`。只有格式、fixtures 和 Core 先形成独立边界，MDV 才不会变成只能由单一编辑器理解的私有文件。
 
 ## 17. Format 0.1 冻结项
 
-首份语言无关规范见 [`../spec/format-0.1.md`](../spec/format-0.1.md)。实现基线固定为：
+首份语言无关规范见 [`format-0.1.md`](../../spec/format-0.1.md)。实现基线固定为：
 
 1. 0.1 Writer 不生成 ZIP64，Reader 拒绝 ZIP64、多磁盘和加密 ZIP；实现可设置更低的可配置资源上限。
 2. 同一 minor 中的未知 JSON 字段允许读取并产生 warning；Writer 重写对应对象时必须保留未知字段和值。`gfm` 是 0.1 唯一登记的 `markdownProfile`，其他合法 token 产生 warning 而不是读取失败。

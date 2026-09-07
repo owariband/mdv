@@ -28,13 +28,17 @@ export interface ArchiveReadOptions {
   readonly limits?: Partial<ReadLimits>
 }
 
+export interface ArchiveWarning extends FormatWarning {
+  readonly entry: string
+}
+
 export interface OpenedArchive {
   readonly manifest: ManifestFileDto
   readonly referenceHead: string | null
   readonly documentHead: string | null
   readonly referenceVersions: readonly LocatedVersionFileDto<VersionMetaFileDto>[]
   readonly documentVersions: readonly LocatedVersionFileDto<DocumentVersionMetaFileDto>[]
-  readonly warnings: readonly FormatWarning[]
+  readonly warnings: readonly ArchiveWarning[]
 
   readWorkingCopy(tree: ArchiveTreeKind): Promise<Uint8Array>
   readVersionContent(tree: ArchiveTreeKind, versionId: string): Promise<Uint8Array>
@@ -79,13 +83,8 @@ const ALLOWED_FIXED_FILES = new Set([
   'doc_tree/HEAD',
   'doc_tree/current.md',
 ])
-const REQUIRED_FILES = [
-  'manifest.json',
-  'ref_tree/current.md',
-  'doc_tree/current.md',
-] as const
 const HEAD = /^v_[0-9a-f]{32}\n$/
-const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true })
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
 export async function openArchiveFromBytes(
   bytes: Uint8Array,
@@ -105,7 +104,7 @@ export async function openArchiveFromPath(
 async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<OpenedArchive> {
   const scanned = await scanEntries(source, limits)
   try {
-    const manifestEntry = requireEntry(scanned.entries, 'manifest.json')
+    const manifestEntry = requireManifestEntry(scanned.entries)
     const manifestValue = parseJsonEntry(
       await readEntryBytes(scanned.zip, manifestEntry, limits.maxJsonBytes),
       'manifest.json',
@@ -120,32 +119,41 @@ async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<O
       throw mapFormatError(cause, 'manifest.json')
     }
 
+    validateArchiveLayout(scanned.entries)
+    const referenceWorkingCopyEntry = requireEntry(scanned.entries, 'ref_tree/current.md')
+    const documentWorkingCopyEntry = requireEntry(scanned.entries, 'doc_tree/current.md')
     const referenceHead = await readHead(scanned, 'ref_tree/HEAD')
     const documentHead = await readHead(scanned, 'doc_tree/HEAD')
     const referenceVersions: LocatedVersionFileDto<VersionMetaFileDto>[] = []
     const documentVersions: LocatedVersionFileDto<DocumentVersionMetaFileDto>[] = []
-    const warnings = [...manifestDecoded.warnings]
+    const warnings = locateWarnings('manifest.json', manifestDecoded.warnings)
 
     const versionPaths = collectVersionPaths(scanned.entries, limits)
     for (const version of versionPaths.reference) {
       const decoded = await readReferenceMetadata(scanned, version, limits)
       referenceVersions.push({ directoryId: version.id, meta: decoded.value })
-      warnings.push(...decoded.warnings)
+      warnings.push(...locateWarnings(
+        `ref_tree/versions/${version.id}/meta.json`,
+        decoded.warnings,
+      ))
     }
     for (const version of versionPaths.document) {
       const decoded = await readDocumentMetadata(scanned, version, limits)
       documentVersions.push({ directoryId: version.id, meta: decoded.value })
-      warnings.push(...decoded.warnings)
+      warnings.push(...locateWarnings(
+        `doc_tree/versions/${version.id}/meta.json`,
+        decoded.warnings,
+      ))
     }
 
     const referenceWorkingCopy = await readMarkdownEntry(
       scanned,
-      requireEntry(scanned.entries, 'ref_tree/current.md'),
+      referenceWorkingCopyEntry,
       limits.maxEntryBytes,
     )
     const documentWorkingCopy = await readMarkdownEntry(
       scanned,
-      requireEntry(scanned.entries, 'doc_tree/current.md'),
+      documentWorkingCopyEntry,
       limits.maxEntryBytes,
     )
 
@@ -169,7 +177,7 @@ async function openArchive(source: ArchiveSource, limits: ReadLimits): Promise<O
 class IndexedArchive implements OpenedArchive {
   readonly referenceVersions: readonly LocatedVersionFileDto<VersionMetaFileDto>[]
   readonly documentVersions: readonly LocatedVersionFileDto<DocumentVersionMetaFileDto>[]
-  readonly warnings: readonly FormatWarning[]
+  readonly warnings: readonly ArchiveWarning[]
   private readonly referenceMeta: ReadonlyMap<string, VersionMetaFileDto>
   private readonly documentMeta: ReadonlyMap<string, DocumentVersionMetaFileDto>
 
@@ -181,7 +189,7 @@ class IndexedArchive implements OpenedArchive {
     readonly documentHead: string | null,
     referenceVersions: readonly LocatedVersionFileDto<VersionMetaFileDto>[],
     documentVersions: readonly LocatedVersionFileDto<DocumentVersionMetaFileDto>[],
-    warnings: readonly FormatWarning[],
+    warnings: readonly ArchiveWarning[],
     private readonly referenceWorkingCopy: Uint8Array,
     private readonly documentWorkingCopy: Uint8Array,
   ) {
@@ -202,12 +210,18 @@ class IndexedArchive implements OpenedArchive {
       ? this.referenceMeta.get(versionId)
       : this.documentMeta.get(versionId)
     if (metadata === undefined) {
-      throw new ArchiveError('INVALID_VERSION', `Unknown ${tree} version ${versionId}`)
+      throw new ArchiveError('INVALID_VERSION', `Unknown ${tree} version ${versionId}`, {
+        details: { tree, versionId },
+      })
     }
 
     const entryName = `${tree === 'reference' ? 'ref_tree' : 'doc_tree'}/versions/${versionId}/content.md`
     const scanned = await scanEntries(this.source, this.limits)
     try {
+      requireManifestEntry(scanned.entries)
+      validateArchiveLayout(scanned.entries)
+      requireEntry(scanned.entries, 'ref_tree/current.md')
+      requireEntry(scanned.entries, 'doc_tree/current.md')
       const bytes = await readMarkdownEntry(
         scanned,
         requireEntry(scanned.entries, entryName),
@@ -218,7 +232,17 @@ class IndexedArchive implements OpenedArchive {
         throw new ArchiveError(
           'INTEGRITY_MISMATCH',
           `Version content does not match metadata for ${versionId}`,
-          { entry: entryName },
+          {
+            entry: entryName,
+            details: {
+              tree,
+              versionId,
+              expectedContentBytes: metadata.contentBytes,
+              actualContentBytes: bytes.byteLength,
+              expectedContentSha256: metadata.contentSha256,
+              actualContentSha256: actualHash,
+            },
+          },
         )
       }
       return bytes
@@ -230,6 +254,13 @@ class IndexedArchive implements OpenedArchive {
   async close(): Promise<void> {
     // Readers do not retain a file descriptor after indexing.
   }
+}
+
+function locateWarnings(
+  entry: string,
+  warnings: readonly FormatWarning[],
+): ArchiveWarning[] {
+  return warnings.map((warning) => Object.freeze({ ...warning, entry }))
 }
 
 async function scanEntries(source: ArchiveSource, limits: ReadLimits): Promise<ScannedEntries> {
@@ -247,7 +278,7 @@ async function scanEntries(source: ArchiveSource, limits: ReadLimits): Promise<S
           validateEntrySizes: true,
         })
   } catch (cause) {
-    throw new ArchiveError('INVALID_ARCHIVE', 'Input is not a readable ZIP archive', { cause })
+    throw mapArchiveOpenError(source, cause)
   }
 
   try {
@@ -289,23 +320,9 @@ async function scanEntries(source: ArchiveSource, limits: ReadLimits): Promise<S
         )
       }
 
-      if (name.endsWith('/')) {
-        if (!ALLOWED_DIRECTORIES.has(name) && !VERSION_DIRECTORY.test(name)) {
-          throw new ArchiveError('INVALID_ARCHIVE', `Unexpected directory entry ${name}`, {
-            entry: name,
-          })
-        }
-        continue
-      }
-      if (!ALLOWED_FIXED_FILES.has(name) && !VERSION_PATH.test(name)) {
-        throw new ArchiveError('INVALID_ARCHIVE', `Unexpected file entry ${name}`, { entry: name })
-      }
       entries.set(name, entry)
     }
 
-    for (const required of REQUIRED_FILES) {
-      requireEntry(entries, required)
-    }
     return { zip, entries }
   } catch (cause) {
     zip.close()
@@ -313,6 +330,53 @@ async function scanEntries(source: ArchiveSource, limits: ReadLimits): Promise<S
       throw cause
     }
     throw new ArchiveError('INVALID_ARCHIVE', 'Failed while indexing ZIP entries', { cause })
+  }
+}
+
+function mapArchiveOpenError(source: ArchiveSource, cause: unknown): ArchiveError {
+  if (source.kind === 'path') {
+    const code = readFileSystemErrorCode(cause)
+    const details = code === null ? { path: source.path } : { path: source.path, ioCode: code }
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return new ArchiveError('NOT_FOUND', `MDV file not found: ${source.path}`, { details, cause })
+    }
+    if (code !== null) {
+      return new ArchiveError('IO_ERROR', `Failed to open MDV file ${source.path}`, {
+        details,
+        cause,
+      })
+    }
+    return new ArchiveError('INVALID_ARCHIVE', 'Input is not a readable ZIP archive', {
+      details,
+      cause,
+    })
+  }
+  return new ArchiveError('INVALID_ARCHIVE', 'Input is not a readable ZIP archive', { cause })
+}
+
+function readFileSystemErrorCode(cause: unknown): string | null {
+  if (cause === null || typeof cause !== 'object') {
+    return null
+  }
+  const error = cause as { readonly code?: unknown; readonly syscall?: unknown }
+  return typeof error.code === 'string' && typeof error.syscall === 'string'
+    ? error.code
+    : null
+}
+
+function validateArchiveLayout(entries: ReadonlyMap<string, yauzl.Entry>): void {
+  for (const name of entries.keys()) {
+    if (name.endsWith('/')) {
+      if (!ALLOWED_DIRECTORIES.has(name) && !VERSION_DIRECTORY.test(name)) {
+        throw new ArchiveError('INVALID_ARCHIVE', `Unexpected directory entry ${name}`, {
+          entry: name,
+        })
+      }
+      continue
+    }
+    if (!ALLOWED_FIXED_FILES.has(name) && !VERSION_PATH.test(name)) {
+      throw new ArchiveError('INVALID_ARCHIVE', `Unexpected file entry ${name}`, { entry: name })
+    }
   }
 }
 
@@ -537,12 +601,18 @@ async function readMarkdownEntry(
   maxBytes: number,
 ): Promise<Uint8Array> {
   const bytes = await readEntryBytes(scanned.zip, entry, maxBytes)
+  let text: string
   try {
-    UTF8_DECODER.decode(bytes)
+    text = UTF8_DECODER.decode(bytes)
   } catch (cause) {
     throw new ArchiveError('INVALID_UTF8', `Entry ${entry.fileName} is not valid UTF-8`, {
       entry: entry.fileName,
       cause,
+    })
+  }
+  if (text.charCodeAt(0) === 0xfeff) {
+    throw new ArchiveError('INVALID_UTF8', `Entry ${entry.fileName} must not contain a UTF-8 BOM`, {
+      entry: entry.fileName,
     })
   }
   return bytes
@@ -604,21 +674,37 @@ function requireEntry(
   return entry
 }
 
+function requireManifestEntry(entries: ReadonlyMap<string, yauzl.Entry>): yauzl.Entry {
+  const entry = entries.get('manifest.json')
+  if (entry === undefined) {
+    throw new ArchiveError('NOT_MDV', 'ZIP archive does not contain manifest.json', {
+      entry: 'manifest.json',
+    })
+  }
+  return entry
+}
+
 function rejectWrongFormat(value: unknown): void {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return
   }
   const manifest = value as Record<string, unknown>
   if (manifest.format !== 'mdv') {
-    throw new ArchiveError('NOT_MDV', 'manifest.json does not identify an MDV document', {
-      entry: 'manifest.json',
-    })
+    if (typeof manifest.format === 'string') {
+      throw new ArchiveError('NOT_MDV', 'manifest.json does not identify an MDV document', {
+        entry: 'manifest.json',
+      })
+    }
+    return
   }
-  if (manifest.formatVersion !== '0.1') {
+  if (typeof manifest.formatVersion === 'string' && manifest.formatVersion !== '0.1') {
     throw new ArchiveError(
       'UNSUPPORTED_FORMAT',
       `Unsupported MDV format version ${String(manifest.formatVersion)}`,
-      { entry: 'manifest.json' },
+      {
+        entry: 'manifest.json',
+        details: { formatVersion: manifest.formatVersion },
+      },
     )
   }
 }
@@ -631,7 +717,11 @@ function mapFormatError(cause: unknown, entry: string): ArchiveError {
     return new ArchiveError(
       cause.kind === 'manifest' ? 'INVALID_MANIFEST' : 'INVALID_VERSION',
       cause.message,
-      { entry, cause },
+      {
+        entry,
+        details: { kind: cause.kind, issues: cause.issues },
+        cause,
+      },
     )
   }
   return new ArchiveError('INVALID_ARCHIVE', `Failed to decode ${entry}`, { entry, cause })

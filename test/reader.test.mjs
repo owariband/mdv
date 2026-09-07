@@ -39,6 +39,50 @@ test('maps a non-MDV manifest before shape validation', async () => {
   )
 })
 
+test('distinguishes missing paths and ZIP archives without an MDV manifest', async () => {
+  await assert.rejects(
+    openArchiveFromPath('fixtures/missing.mdv'),
+    (error) => {
+      assert.ok(isArchiveError(error, 'NOT_FOUND'))
+      assert.equal(error.details.ioCode, 'ENOENT')
+      assert.match(error.details.path, /fixtures\/missing\.mdv$/)
+      return true
+    },
+  )
+
+  const emptyZip = Buffer.from('504b0506000000000000000000000000000000000000', 'hex')
+  await assert.rejects(
+    openArchiveFromBytes(emptyZip),
+    (error) => {
+      assert.ok(isArchiveError(error, 'NOT_MDV'))
+      assert.equal(error.details.entry, 'manifest.json')
+      return true
+    },
+  )
+})
+
+test('keeps malformed ZIP bytes classified as an invalid archive', async () => {
+  await assert.rejects(
+    openArchiveFromBytes(Buffer.from('not a ZIP archive')),
+    (error) => isArchiveError(error, 'INVALID_ARCHIVE'),
+  )
+})
+
+test('rejects the UTF-8 BOM forbidden by the format', async () => {
+  assert.throws(
+    () => parseJsonEntry(
+      Buffer.from([0xef, 0xbb, 0xbf, 0x7b, 0x7d]),
+      'manifest.json',
+      32,
+    ),
+    (error) => isArchiveError(error, 'INVALID_MANIFEST'),
+  )
+  await assert.rejects(
+    openArchiveFromPath('fixtures/invalid/markdown-bom.mdv'),
+    (error) => isArchiveError(error, 'INVALID_UTF8'),
+  )
+})
+
 test('leaves cross-entry bind validation to Core', async () => {
   const archive = await openArchiveFromPath('fixtures/invalid/dangling-reference.mdv')
   assert.throws(() => hydrateArchiveIndex(archive), GraphValidationError)

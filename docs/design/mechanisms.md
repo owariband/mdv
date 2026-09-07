@@ -1,10 +1,12 @@
-# MDV Core 技术方案（Draft 0.4）
+# MDV Core 技术机制与实现方案（Draft 0.5）
 
 > 状态：项目结构与模型设计草案
 >
 > 适用范围：`@mdv/core` 的 TypeScript 实现、本地文件事务和 Library API
 >
-> 产品语义与文件格式以 [`design.md`](./design.md) 为准；本文不重复定义另一套格式
+> 产品语义与文件格式以 [`architecture.md`](./architecture.md) 为准；本文不重复定义另一套格式
+>
+> 文档属性：维护者设计，包含尚未落地的机制；当前可用接口见 [`api-reference.md`](../api-reference.md)
 
 ## 1. 已确定的技术结论
 
@@ -17,7 +19,9 @@
 7. 当前只有 ZIP 一种后端，不提前增加 `Repository`、`Manager`、`ServiceFactory` 或可插拔存储接口。
 8. `mimetype` 条目不进入 0.1；根 `manifest.json` 是格式识别和并发 generation 的入口。
 9. CLI 是独立的上游业务项目，不属于 `@mdv/core` 的源码、发布包或内部层次。
-10. Core 不依赖 CLI，也不定义 argv、JSON envelope 或退出码；它只提供足够稳定的 public API 供 CLI、MarkText 和其他宿主调用。
+10. Core 不依赖 CLI，也不定义 argv、JSON envelope 或退出码；它只提供足够稳定的 public API 供 CLI、VS Code、MarkText 和其他宿主调用。
+11. 外部受管资源属于 Core 的文件语义：Core 负责内容寻址、相对路径解析、读取、写入和哈希校验；宿主负责 paste/drop、Markdown 插入与渲染。
+12. Public `interface` 只描述调用方实际消费的对象契约；泛型只在能保留真实类型关系或复用同一校验逻辑时使用，不把“库”设计成多层通用框架。
 
 ## 2. 责任边界
 
@@ -29,6 +33,7 @@
 - 查询历史、分叉、Document trace、Reference trace 和漂移；
 - 保存工作副本，显式 commit，checkout 和源文本 Diff；
 - generation CAS、跨进程锁、完整新包校验和原子替换；
+- 管理 `.mdv` 同级内容寻址 sidecar 中的受管资源；
 - 对外返回稳定错误码和只读结果。
 
 ### 2.2 Core 不负责
@@ -37,7 +42,8 @@
 - GFM、数学公式、Mermaid 等具体语法的解释；
 - Electron/Vue UI、自动保存时机、Agent 任务调度和审批发布流程；
 - 把不同 Markdown 解析器的模型统一成一种“万能 AST”；
-- 管理 Markdown 中外部附件的生命周期。
+- 扫描或改写 Markdown 中的任意链接、下载网络资源、处理宿主 paste/drop、渲染图片；
+- 自动删除受管资源，或保证未随 `.mdv` 一同移动的 sidecar 仍然可用。
 
 ### 2.3 Markdown 为什么不能只返回 path
 
@@ -57,13 +63,13 @@ Core 的主交接方式因此是：
 @mdv/core --读取容器--> Markdown bytes / UTF-8 text + baseDirectory
                                       |
                                       v
-                            MarkText adapter / 其他 parser
+                         VS Code / MarkText adapter / 其他 parser
                                       |
                                       v
-                              Muya State / AST / HTML
+                           editor state / AST / HTML
 ```
 
-Muya 当前构造参数和 `setContent` 都可以直接接收 Markdown 字符串，所以 MarkText adapter 不需要先落一个临时 `.md`。如果将来某个外部工具只接受 path，由那个 adapter 显式导出临时文件，并负责临时文件的清理、监听、冲突和回写；这不是 Core 的默认数据模型。
+主流 Markdown 编辑器和 parser 都可以直接接收 Markdown 字符串，因此 adapter 不需要先落一个临时 `.md`。如果将来某个外部工具只接受 path，由那个 adapter 显式导出临时文件，并负责临时文件的清理、监听、冲突和回写；这不是 Core 的默认数据模型。
 
 ### 2.4 Agent 实际如何修改文件
 
@@ -90,7 +96,7 @@ LLM 只产生工具调用意图，真正读写文件的是 Agent Runtime。以�
 ## 3. 三层架构
 
 ```text
-MarkText adapter / TypeScript 宿主 --------+
+VS Code / MarkText adapter / TypeScript 宿主 -+
                                            |
 独立 mdv-cli 项目 -------------------------+
                                            |
@@ -176,8 +182,20 @@ mdv/
 ├── package.json
 ├── tsconfig.json
 ├── docs/
-│   ├── design.md
-│   └── technical_solution.md
+│   ├── README.md
+│   ├── getting-started.md
+│   ├── concepts.md
+│   ├── api-reference.md
+│   ├── resources.md
+│   ├── assets/
+│   └── design/
+│       ├── index.md
+│       ├── architecture.md
+│       ├── mechanisms.md
+│       ├── roadmap.md
+│       ├── decisions.md
+│       ├── open-questions.md
+│       └── log.md
 ├── spec/
 │   └── format-0.1.md
 ├── schemas/
@@ -368,6 +386,13 @@ interface MarkdownSource {
   }
 }
 
+interface MdvWarning {
+  readonly code: 'UNKNOWN_FIELD' | 'UNKNOWN_MARKDOWN_PROFILE'
+  readonly entry: string
+  readonly path: string
+  readonly message: string
+}
+
 interface DocumentTrace {
   readonly document: DocumentVersionSummary
   readonly ancestry: readonly DocumentVersionSummary[]
@@ -432,13 +457,22 @@ interface DocumentSnapshot {
   readonly manifest: ManifestSummary
   readonly packagePath: string | null
   readonly baseDirectory: string | null
+  readonly referenceTree: { readonly head: VersionId | null }
+  readonly documentTree: { readonly head: VersionId | null }
+  readonly warnings: readonly MdvWarning[]
   readonly status: DocumentStatus
 
+  listVersions(query: { readonly tree: 'reference' }): readonly ReferenceVersionSummary[]
+  listVersions(query: { readonly tree: 'document' }): readonly DocumentVersionSummary[]
   listVersions(query?: VersionQuery): readonly VersionSummary[]
+  getHistory(tree: 'reference', from?: VersionId): readonly ReferenceVersionSummary[]
+  getHistory(tree: 'document', from?: VersionId): readonly DocumentVersionSummary[]
   getHistory(tree: TreeKind, from?: VersionId): readonly VersionSummary[]
+  getChildren(tree: 'reference', version: VersionId): readonly ReferenceVersionSummary[]
+  getChildren(tree: 'document', version: VersionId): readonly DocumentVersionSummary[]
   getChildren(tree: TreeKind, version: VersionId): readonly VersionSummary[]
   getDocumentReference(document: VersionId): VersionId | null
-  listDocumentsUsingReference(reference: VersionId): readonly VersionSummary[]
+  listDocumentsUsingReference(reference: VersionId): readonly DocumentVersionSummary[]
   traceDocument(document: VersionId): DocumentTrace
   traceReference(reference: VersionId): ReferenceTrace
 
@@ -460,6 +494,7 @@ interface DocumentSnapshot {
 打开阶段只读取 manifest、Head 和所有 version meta，并建立索引；正文由 `read*` 首次访问时按需解压和验哈希。因而：
 
 - 打开时间与版本元数据总量相关，不与全部正文大小线性绑定；
+- `listVersions`、`getChildren` 和反向 bind 查询按 RFC 3339 实际时刻升序返回，并以 Version ID 打破平局；`getHistory` 从起点沿 parent 返回到根；
 - `getHistory` 是 O(祖先深度)；
 - `getChildren` 和 reverse bind 查询在建好索引后是 O(结果数)；
 - trace 不要求把正文加载进内存。
@@ -598,18 +633,18 @@ type PackageMutation =
 
 ## 9. 宿主接入
 
-### 9.1 MarkText 与其他 Markdown parser
+### 9.1 VS Code、MarkText 与其他 Markdown 宿主
 
-MarkText adapter 的最小流程：
+任意宿主 adapter 的最小 Core 调用流程：
 
 ```ts
 const document = await openMdv(filePath)
 let generation = document.manifest.generation
 
-muya.setContent(await document.readDocumentText())
+editor.setContent(await document.readDocumentText())
 
 const result = await document.saveDocument({
-  markdown: muya.getMarkdown(),
+  markdown: editor.getMarkdown(),
   expectedGeneration: generation,
 })
 
@@ -621,10 +656,10 @@ adapter 另外负责：
 - 把 `baseDirectory` 交给图片、链接和导出逻辑；
 - 决定何时普通保存、何时显式 commit；
 - 在 UI 中展示两棵历史、unbound、drift 和冲突；
-- 把 Muya 的 Markdown 字符串传回 Core，而不是把 Muya State 写进 `.mdv`；
-- 用 adapter 集成测试验证 `Markdown -> Muya -> Markdown`，Core 测试不承担渲染正确性。
+- 把 Markdown 字符串传回 Core，而不是把宿主编辑器 State 写进 `.mdv`；
+- 用 adapter 集成测试验证 `Markdown -> editor state -> Markdown`，Core 测试不承担渲染正确性。
 
-其他 parser 采用同样方式。若 parser 只支持 path，可以在独立 adapter 包中增加 `materializeMarkdown`；第一版 Core 不提供它，因为 Muya 不需要，而且临时文件会引入额外的生命周期和写回语义。
+VS Code extension 是 Core 0.1 闭环后的第一个计划客户端，使用虚拟 Markdown 文档呈现 Reference/Document；MarkText adapter 后续接入。若某个 parser 只支持 path，可以在独立 adapter 包中增加 `materializeMarkdown`；第一版 Core 不提供它，因为临时文件会引入额外的生命周期和写回语义。
 
 ### 9.2 独立 `mdv-cli` 的上游边界
 
@@ -687,7 +722,7 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 - bytes byte-for-byte round-trip，text 严格 UTF-8 解码；
 - `create -> save -> commit -> reopen -> trace -> export`；
 - `referenceVersion: null` 的普通版本 Markdown 闭环；
-- MarkText adapter 单独验证 Muya 的加载和保存。
+- 各宿主 adapter 单独验证自身编辑器模型的加载和保存。
 
 ## 12. 实现顺序
 
@@ -697,6 +732,6 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 4. 实现 Core hydrate、invariants、索引与 trace 查询。
 5. 接出只读 public API 和 bytes/text 内容接口。
 6. 实现 transaction、save、commit、checkout 和冲突测试。
-7. 实现源文本 Diff，并在 MarkText 项目中接入 adapter。
+7. 实现源文本 Diff 和内容寻址外部资源闭环，完成 Core 验收后再启动 VS Code extension。
 
 第一阶段不做 Markdown AST 抽象、不做通用 Repository、不做插件系统，也不为了 path-only 工具增加临时文件协议。先完成 Core 的可读、可写、可追踪和并发安全闭环；Agent 可装配 CLI 由独立上游项目基于 public API 实现。

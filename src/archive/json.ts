@@ -2,7 +2,7 @@ import { TextDecoder } from 'node:util'
 
 import { ArchiveError } from './errors.js'
 
-const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true })
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
 export function parseJsonEntry(
   bytes: Uint8Array,
