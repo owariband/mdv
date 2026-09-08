@@ -11,10 +11,19 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
-## M6 工程硬化交付 — 2026-09-08
+## M6 首次 Windows CI 修复 — 2026-09-08
 
-- 状态：工程实现与本地验收完成；本节先按交付批次记录，提交落地后补记真实 SHA 与远端 CI 结果，不改写既有历史。
-- 提交标题：`test: harden core packaging, conformance and release checks`
+- 原始证据：[首次 CI](https://github.com/owariband/mdv/actions/runs/34193052019) 的 Linux/macOS 共 7 组通过，Windows Node 22/24/26 共 3 组失败；各 Windows 组均为同样 3 项失败、176 通过、4 项既有 POSIX 专用测试跳过，tarball 步骤未执行。
+- Reader 在已打开的 descriptor 上复用 fstat，同时检查普通文件类型。目录输入不再依赖平台目录 size/读取行为，而是从 open / metadata verify / full verify 稳定抛 `IO_ERROR`；不新增路径预检查或第二个文件句柄。
+- 两个同句柄读取测试不再假设目标打开时总能被 rename 覆盖；Windows 仅接受实际 `EPERM` 分支，检查失败替换不改变两份文件、原内容仍正确读取/校验，并确认句柄关闭后替换成功。POSIX 继续验证读取期间原子替换；没有 skip 这两项或放宽 hash/CAS。
+- 生产修改仅在 `archive/reader.ts`，不改公开签名、Format 0.1、Writer、资源发布、运行依赖或版本语义。
+- 本地针对性 37 项通过；完整 `npm run check` 为 183 项（182 通过、1 项 Windows 专用跳过），真实 tarball runtime 与双 TypeScript consumer 通过；修复后的远端矩阵待验证，未提前标记 Windows 成功。
+
+## `a05b4d0` — `test: harden core packaging, conformance and release checks`
+
+- 完整 SHA：`a05b4d047fe48f983fa65303a67b7510a1bb03b4`
+- 日期：2026-09-08
+- 状态：M6 工程实现与本地验收完成，已推送至 `origin/main`；远端 [Core verification](https://github.com/owariband/mdv/actions/runs/34193052019) 已完成，7 组通过、3 组 Windows 失败；修复单独记录，不改写本提交历史。
 
 ### 详细交付说明
 
@@ -35,7 +44,7 @@
 - macOS arm64 / Node 26.3.0：`npm run check` 共 183 项，182 通过、1 项 Windows 专用路径用例按平台跳过；独立 tarball runtime 和双 TypeScript consumer 通过。发布 gate 的放行/阻止/lock 身份与私有 registry 拒绝均有临时合成数据回归。
 - 默认 fuzz 256 输入通过，额外 `MDV_FUZZ_SEED=1 MDV_FUZZ_CASES=10000` 通过（3,087 可完整读取、6,913 被分类拒绝）；有限随机证据不等于任意输入安全证明。
 - fixture 在 America/Los_Angeles 和 Asia/Shanghai 两种时区字节检查通过。完整六场景基准通过；最大 1000 × 64 KiB 场景 open/full verify/save/commit 中位数约 69/125/648/671 ms，进程峰值约 222.5 MiB，见原始基线。
-- 严格 release gate 因当前开发版本、UNLICENSED 与缺少 LICENSE 按预期非零退出；没有实际 npm 发布或远端 CI 成功证据。
+- 严格 release gate 因当前开发版本、UNLICENSED 与缺少 LICENSE 按预期非零退出；没有实际 npm 发布。首次远端 CI 的 Linux/macOS 检查通过，Windows 问题见上方修复记录。
 - `src/`、Format 0.1、Schema 和 runtime dependencies 未改变；既有 `.gitignore` 用户改动未触碰，未修改任何 Git 全局配置。
 - M6 整体仍待远端矩阵、scope/License/版本和实际发布验收；不将工程检查完成等同于稳定发布完成。
 

@@ -248,7 +248,15 @@ test('verifies valid, graph-invalid, content-corrupt, and unreadable sources at 
     (error) => isMdvError(error, 'NOT_FOUND'),
   )
   await assert.rejects(
+    openMdv(resolve('fixtures')),
+    (error) => isMdvError(error, 'IO_ERROR'),
+  )
+  await assert.rejects(
     verifyMdv(resolve('fixtures')),
+    (error) => isMdvError(error, 'IO_ERROR'),
+  )
+  await assert.rejects(
+    verifyMdv(resolve('fixtures'), { mode: 'full' }),
     (error) => isMdvError(error, 'IO_ERROR'),
   )
 

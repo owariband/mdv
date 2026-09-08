@@ -640,7 +640,7 @@ async function openZip(source: ArchiveSource, limits: ReadLimits): Promise<yauzl
   const descriptor = await openDescriptor(source.path)
   let transferred = false
   try {
-    const size = await descriptorSize(descriptor)
+    const size = await descriptorSize(descriptor, source.path)
     const profile = inspectZipContainerProfile(
       await readDescriptorTail(descriptor, size),
       size,
@@ -850,11 +850,17 @@ function openDescriptor(path: string): Promise<number> {
   })
 }
 
-function descriptorSize(descriptor: number): Promise<number> {
+function descriptorSize(descriptor: number, path: string): Promise<number> {
   return new Promise((resolvePromise, rejectPromise) => {
     statFileDescriptor(descriptor, (error, stats) => {
       if (error) {
         rejectPromise(error)
+        return
+      }
+      if (!stats.isFile()) {
+        rejectPromise(new ArchiveError('IO_ERROR', 'MDV input must be a regular file', {
+          details: { path, reason: 'non-regular-file' },
+        }))
         return
       }
       resolvePromise(stats.size)

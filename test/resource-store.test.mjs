@@ -114,18 +114,31 @@ test('bounded reads check both initial size and growth after opening', async (t)
   }), { code: 'LIMIT_EXCEEDED' })
 })
 
-test('resource reads use one opened file even if its pathname is atomically replaced', async (t) => {
+test('resource reads keep original bytes when replacement succeeds or is blocked until close', async (t) => {
   const base = await temporaryDirectory(t)
   await importResource(base, IMAGE)
+  const path = join(base, IMAGE.location.relativePath)
+  const replacementPath = `${path}.replacement`
+  let replacementBlocked = false
   const bytes = await readResource(base, IMAGE.location, 1024, {
-    async checkpoint(stage, { path }) {
+    async checkpoint(stage) {
       if (stage === 'after-open') {
-        await writeFile(`${path}.replacement`, GIF)
-        await rename(`${path}.replacement`, path)
+        await writeFile(replacementPath, GIF)
+        try {
+          await rename(replacementPath, path)
+        } catch (error) {
+          // Windows may refuse replacement of an open destination. Verify both paths.
+          if (process.platform !== 'win32' || error.code !== 'EPERM') throw error
+          replacementBlocked = true
+          assert.deepEqual(await readFile(path), PNG)
+          assert.deepEqual(await readFile(replacementPath), GIF)
+        }
       }
     },
   })
   assert.deepEqual(Buffer.from(bytes), PNG)
+  if (replacementBlocked) await rename(replacementPath, path)
+  assert.deepEqual(await readFile(path), GIF)
   await assert.rejects(readResource(base, IMAGE.location, 1024), { code: 'INTEGRITY_MISMATCH' })
 })
 

@@ -160,7 +160,7 @@ test('full verification handles an archive with no versions without rescanning c
   })
 })
 
-test('path verification keeps metadata and content on the same opened file snapshot', async (t) => {
+test('path verification keeps one snapshot when replacement succeeds or is blocked until close', async (t) => {
   const path = await temporaryArchivePath(t)
   const originalContent = Buffer.from('# Original snapshot\n')
   await writeArchive(path, [
@@ -170,6 +170,7 @@ test('path verification keeps metadata and content on the same opened file snaps
     }),
     ...referenceVersionEntries(REFERENCE_HEAD, null, originalContent),
   ])
+  const originalBytes = await readFile(path)
 
   const metadata = await verifyArchiveMetadataFromPath(path)
   assert.ok(metadata.archive)
@@ -184,13 +185,31 @@ test('path verification keeps metadata and content on the same opened file snaps
     }),
     ...referenceVersionEntries(REFERENCE_HEAD, null, replacementContent),
   ])
-  await rename(replacementPath, path)
+  const replacementBytes = await readFile(replacementPath)
+  let replacementBlocked = false
+  try {
+    await rename(replacementPath, path)
+  } catch (error) {
+    if (process.platform !== 'win32' || error.code !== 'EPERM') throw error
+    replacementBlocked = true
+    assert.deepEqual(await readFile(path), originalBytes)
+    assert.deepEqual(await readFile(replacementPath), replacementBytes)
+  }
 
   const full = await verifyArchiveVersionContents(metadata.archive, 10)
   assert.deepEqual(full, {
     complete: true,
     issues: [],
   })
+  await metadata.archive.close()
+  if (replacementBlocked) await rename(replacementPath, path)
+  const replacement = await verifyArchiveMetadataFromPath(path)
+  assert.ok(replacement.archive)
+  try {
+    assert.deepEqual(Buffer.from(await replacement.archive.readWorkingCopy('reference')), replacementContent)
+  } finally {
+    await replacement.archive.close()
+  }
 })
 
 function baseEntries({

@@ -9,11 +9,12 @@ Core 是 Node.js ESM 库，唯一入口为 `@mdv/core`。不提供 CommonJS `req
 | 环境 | 验证状态 |
 | --- | --- |
 | macOS arm64 / Node 26.3.0 | M6 本地全量测试、独立 tarball/类型检查、性能基准已通过 |
-| Linux、macOS、Windows / Node 22、24、26 | 已配置 9 个 CI job；首次远端运行结果待验证 |
-| Linux / Node 20 | 已配置额外回归 job；不将保留旧运行时兼容等同于其仍受上游维护 |
+| Linux、macOS / Node 22、24、26 | 首次 CI 的 6 组安装、测试和 tarball consumer 已通过 |
+| Windows / Node 22、24、26 | 首次 CI 的 3 组失败；目录输入分类及两项打开期间替换测试正在修复，尚未通过矩阵验收 |
+| Linux / Node 20 | 首次 CI 额外回归 job 已通过；不将保留旧运行时兼容等同于其仍受上游维护 |
 | TypeScript 5.9.3 和仓库当前编译器 7.x | 独立 tarball consumer 通过 strict NodeNext 类型检查；不需要调用方安装 ZIP 库类型或 `@types/node` 才能使用公开声明 |
 
-CI 定义见 [ci.yml](../.github/workflows/ci.yml)。配置矩阵不是验证结果；正式发布前需查看目标提交在所有 job 的实际结论。Node 版本维护状态以 [Node.js 官方发布计划](https://github.com/nodejs/Release#release-schedule)为准。
+CI 定义见 [ci.yml](../.github/workflows/ci.yml)，首次结果见 [a05b4d0 的运行记录](https://github.com/owariband/mdv/actions/runs/34193052019)。正式发布前需查看目标提交在所有 job 的实际结论。Node 版本维护状态以 [Node.js 官方发布计划](https://github.com/nodejs/Release#release-schedule)为准。
 
 ## 文件系统与一致性
 
@@ -24,6 +25,7 @@ CI 定义见 [ci.yml](../.github/workflows/ci.yml)。配置矩阵不是验证结
 - 不承诺保留 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。
 - 普通并发写由 CAS/目录身份检查保护，不是抵抗同权限恶意进程反复替换祖先目录的沙箱。已有 `.lock` 不会按时间自动删除；恢复前必须确认没有活跃 writer。
 - Windows 目录 alias 使用 junction 回归测试。文件 symlink 测试仅在系统明确拒绝创建（`EPERM`）时跳过并报告；POSIX 权限/umask 和动态时区特性有各自平台限定。不会把整个 Windows 写入测试跳过。
+- 当前 Windows runner 会拒绝用 rename 覆盖仍被打开的目标（`EPERM`）；读/verify 继续校验原句柄，关闭后再试替换。两项回归同时验证这些结果，不把 POSIX 的打开期间替换能力当作所有平台保证。真实宿主中也不能用“先删旧文件再重命名”绕过失败，否则会破坏原子性。
 
 失败恢复示例见 [API：文件事务](./api-reference.md#文件事务与支持边界)和[资源发布边界](./resources.md#发布失败与恢复边界)。`committed: true` 意味着发布已经发生，不能当作“没写成功”直接重放旧 generation。
 
