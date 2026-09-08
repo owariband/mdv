@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import * as yazl from 'yazl'
@@ -47,7 +48,7 @@ test('distinguishes missing paths and ZIP archives without an MDV manifest', asy
     (error) => {
       assert.ok(isArchiveError(error, 'NOT_FOUND'))
       assert.equal(error.details.ioCode, 'ENOENT')
-      assert.match(error.details.path, /fixtures\/missing\.mdv$/)
+      assert.ok(error.details.path.endsWith(join('fixtures', 'missing.mdv')))
       return true
     },
   )

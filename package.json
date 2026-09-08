@@ -33,6 +33,13 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "fixtures": "node scripts/build-fixtures.mjs",
+    "fixtures:check": "node scripts/build-fixtures.mjs --check",
+    "test:package": "node scripts/test-package.mjs",
+    "test:fuzz": "npm run build && node --test test/fuzz.test.mjs",
+    "bench": "npm run build && node bench/history.mjs",
+    "check": "npm run typecheck && npm run fixtures:check && npm test && npm run check:release",
+    "check:release": "node scripts/check-release.mjs",
+    "prepublishOnly": "npm run check:release -- --release && npm run check && npm run test:package",
     "prepare": "npm run build",
     "test": "npm run build && node --test test/*.test.mjs"
   },

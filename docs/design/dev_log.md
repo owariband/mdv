@@ -11,6 +11,34 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
+## M6 工程硬化交付 — 2026-09-08
+
+- 状态：工程实现与本地验收完成；本节先按交付批次记录，提交落地后补记真实 SHA 与远端 CI 结果，不改写既有历史。
+- 提交标题：`test: harden core packaging, conformance and release checks`
+
+### 详细交付说明
+
+- 新增三系统 × Node 22/24/26、额外 Linux Node 20 的 CI matrix；固定官方 Actions SHA、只读权限，不保存 checkout 凭据，不包含发布步骤。
+- 固化独立安装验证：无 dist 的源码副本执行 prepare/build，检查真实 tarball 内容，在独立 consumer 仅安装运行依赖后验证公开读写、版本、CAS、trace/Diff/full verify 和图片闭环。
+- 增加 TypeScript 5.9.3 与仓库当前 7.x 的 strict NodeNext consumer；检查树 overload、CommitResult 收窄、只读/located/可写能力、必填 bind/generation、全部错误码和内部子路径封闭。不要求消费者引入 ZIP 类型或 renderer model。
+- fixture 生成不再依赖 macOS `/usr/bin/zip`；固定条目、mode、DOS 时间，提供不写入的 `fixtures:check`，从 10 增加至 15 组 expected/归档。既有归档内容不变，ZIP header 改为跨平台确定性编码。
+- 新增路径与 bytes 双入口 conformance、Zip Slip/绝对路径/反斜杠/空段/NUL、重复/大小写/NFC 冲突、ZIP symlink、严格 JSON/UTF-8/重复转义 key/原型字段、各类预算回归。
+- 新增复杂 Markdown LF/CRLF/CR 原字节往返，覆盖中文/组合 Unicode/front matter/表格/公式/Mermaid/HTML/资源路径/末尾空白和无末尾换行；验证 save 不增 Version、commit bind、dirty/diff、checkout 恢复。
+- 增加固定 seed ZIP/JSON fuzz，worker 内存/输入与父线程终止预算确保测试有界；合法及畸形输入同时走 parse/read/full verify，比较分类并检查输入未被修改。
+- 修正测试中的 POSIX 分隔符/mode 假设，目录 alias 用 Windows junction；文件 symlink 仅遇明确权限限制时 skip，新增 Windows 尾点/空格目标保护测试，保留既有跨进程竞争与故障注入。
+- 增加 10/100/1000 Version × 2/64 KiB 基准，独立进程记录 open/history read/trace/full verify/save/commit 的三轮样本、中位数和峰值 RSS；入库原始本机基线，不设脱离环境的耗时 CI 门槛。
+- 增加开发态与严格发布检查、prepublishOnly，检查 package/lock 身份、唯一 ESM export、产物与公开下载地址；开发版本、UNLICENSED、缺 LICENSE 明确阻挡发布 gate。
+- 同步官方文档与设计知识根，新增兼容性/性能/发布指南，保持 owner 发布身份问题开放；没有新建业务 CLI、Markdown renderer、存储抽象或 Agent DTO。
+
+### 验证与未决项
+
+- macOS arm64 / Node 26.3.0：`npm run check` 共 183 项，182 通过、1 项 Windows 专用路径用例按平台跳过；独立 tarball runtime 和双 TypeScript consumer 通过。发布 gate 的放行/阻止/lock 身份与私有 registry 拒绝均有临时合成数据回归。
+- 默认 fuzz 256 输入通过，额外 `MDV_FUZZ_SEED=1 MDV_FUZZ_CASES=10000` 通过（3,087 可完整读取、6,913 被分类拒绝）；有限随机证据不等于任意输入安全证明。
+- fixture 在 America/Los_Angeles 和 Asia/Shanghai 两种时区字节检查通过。完整六场景基准通过；最大 1000 × 64 KiB 场景 open/full verify/save/commit 中位数约 69/125/648/671 ms，进程峰值约 222.5 MiB，见原始基线。
+- 严格 release gate 因当前开发版本、UNLICENSED 与缺少 LICENSE 按预期非零退出；没有实际 npm 发布或远端 CI 成功证据。
+- `src/`、Format 0.1、Schema 和 runtime dependencies 未改变；既有 `.gitignore` 用户改动未触碰，未修改任何 Git 全局配置。
+- M6 整体仍待远端矩阵、scope/License/版本和实际发布验收；不将工程检查完成等同于稳定发布完成。
+
 ## `c8c30b6` — `feat: complete M5.5 managed image sidecars`
 
 - 完整 SHA：`c8c30b6d7991f2fe3f6abafea6378acc132c2316`

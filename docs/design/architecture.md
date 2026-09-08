@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5.5 已完成；create/read/trace/save/commit/checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片均已从 package root 提供。下一阶段为 M6 发布硬化。
+> 实现进度：M5.5 产品能力与 M6 本地工程硬化已落地；公开 API 和 Format 0.1 未改变，CI 矩阵已配置。远端平台证据、发布身份/License 和正式发布仍待 M6 验收。
 
 ## 1. 背景与目标
 

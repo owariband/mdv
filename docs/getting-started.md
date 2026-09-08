@@ -278,4 +278,4 @@ editor.setMarkdown(new TextDecoder().decode(source.bytes), {
 - 阅读[核心概念](./concepts.md)理解 Reference、Document 和 bind；
 - 阅读[API 参考](./api-reference.md)查看当前可用契约；
 - 阅读[图片与相对资源](./resources.md)处理图片路径；
-- 后续 M6 发布硬化计划见[开发路线图](./design/roadmap.md)；调用方始终通过 package-root API 操作，不直接修改 ZIP entry。
+- M6 已提供[安装与发布检查](./releasing.md)、[兼容性](./compatibility.md)与[性能基线](./performance.md)，剩余验收见[开发路线图](./design/roadmap.md)；调用方始终通过 package-root API 操作，不直接修改 ZIP entry。

@@ -101,3 +101,13 @@
 - 安全与平台：拒绝受管内部 symlink，允许规范化可信基准 alias；目录身份检查不是对同权限恶意进程的沙箱，返回路径也不是永久资源句柄。macOS 本地路径已测试，其他平台 CI 与 crash durability 在 M6 收口。
 - 理由：保持普通 Markdown 编辑底座，同时集中实现 host 不应各自复制的内容寻址、受限读取与原子发布规则；不用渲染器或泛化存储接口扩大库边界。
 - 证据：[资源文档](../resources.md)、[公开 API](../api-reference.md#受管图片)、[`src/resource/`](../../src/resource/)、[`test/resource-api.test.mjs`](../../test/resource-api.test.mjs)。
+
+## D012：M6 工程硬化与正式发布分开验收
+
+- 日期：2026-09-08
+- 状态：Implemented；发布身份仍见 Open O003
+- 决定：延续现有 API/Format/三层结构，仅增加可执行工程检查、测试、基准和文档。CI/bench/scripts 不属于运行时 CLI，不进入 package exports，不新增运行依赖或存储接口。
+- 验证：fixtures 使用独立确定性 ZIP 构造与 expected 结果；tarball consumer 不依赖仓库 dist 或源码链接；fuzz 使用固定 seed、输入预算、worker 内存与父线程时间预算。性能先记录本机数据，不凭猜测优化。
+- 完成口径：本地检查通过、CI 配置存在、远端矩阵通过、正式发布是不同事实。未跑到的系统或断电边界不提前宣称支持；`UNLICENSED` / 开发版本 / 缺 LICENSE 阻止严格发布 gate，但不阻止日常检查。
+- 影响：本轮不选择许可证、不更改 npm/Git 全局配置、不发布 npm、不启动上游插件。正式版本、scope 权限由 owner 决定。
+- 证据：[M6 实际交付](./roadmap.md#m6一致性性能与发布收口)、[发布检查](../releasing.md)、[性能数据](../performance.md)。

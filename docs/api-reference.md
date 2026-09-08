@@ -1,6 +1,6 @@
 # 当前 API 参考
 
-本页只记录当前从 `@mdv/core` package root 导出的公开 API。M5.5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片；正式发布硬化仍属于 M6。
+本页只记录当前从 `@mdv/core` package root 导出的公开 API。M5.5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片；M6 没有改变这些 API。安装验证、默认预算与平台验证状态见[兼容性](./compatibility.md)；正式 npm 发布尚未完成。
 
 ## 运行环境与入口
 
@@ -451,7 +451,7 @@ document = await document.saveDocument({
 
 Writer 在目标同目录创建 mode `0600` 的唯一临时 ZIP，逐条复制并校验历史内容，使用完整 Reader 验证新包，刷新临时文件后再发布。保存以同目录原子 replace 为 commit point；POSIX 本地文件系统随后同步父目录。commit point 前失败时旧包保持 byte-for-byte 不变；commit point 后若目录同步失败，错误 details 会包含 `committed: true` 和已发布的 generation，调用方必须重新 `openMdv` 确认状态。
 
-当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。MDV 整包写事务拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件；受管图片使用上节单独描述的不覆盖发布规则。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，但正式 CI 矩阵留到发布收口阶段。
+当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。MDV 整包写事务拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件；受管图片使用上节单独描述的不覆盖发布规则。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，M6 已配置三系统 CI，但远端运行结果待验证。
 
 Windows 使用可写句柄刷新临时文件，并依赖 Node 的同目录 rename/link 提供可见性；Node 没有可移植的 Windows 目录 fsync/write-through 接口，因此断电后的目录项持久性尚未达到 POSIX 路径的同等级保证，也尚未经过 Windows CI 实测。Windows 目标名末尾的点或空格会被拒绝，以免路径规范化产生第二把锁。
 

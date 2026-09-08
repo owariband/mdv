@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含尚未落地的机制；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5.5 已完成；结构化 status、统一内容选择、bounded source Diff、顶层完整性诊断与受管图片均已从 package root 提供。下一阶段是 M6 发布硬化。
+> 实现进度：M5.5 产品能力与 M6 本地工程硬化已落地；M6 远端平台验证、发布身份与正式发布仍待验收。公开 API、Format 0.1 与生产分层未因 M6 改变。
 
 ## 1. 已确定的技术结论
 
@@ -188,12 +188,23 @@ CLI 不校验版本图、不拼 ZIP entry、不直接获得锁，也不复制 sa
 mdv/
 ├── package.json
 ├── tsconfig.json
+├── .github/workflows/ci.yml
+├── scripts/
+│   ├── build-fixtures.mjs
+│   ├── test-package.mjs
+│   └── check-release.mjs
+├── bench/
+│   ├── history.mjs
+│   └── baselines/
 ├── docs/
 │   ├── README.md
 │   ├── getting-started.md
 │   ├── concepts.md
 │   ├── api-reference.md
 │   ├── resources.md
+│   ├── compatibility.md
+│   ├── performance.md
+│   ├── releasing.md
 │   ├── assets/
 │   └── design/
 │       ├── index.md
@@ -243,6 +254,13 @@ mdv/
 │       ├── model.ts
 │       └── store.ts
 └── test/
+    ├── package-consumer/
+    ├── helpers/
+    ├── compatibility.test.mjs
+    ├── fixtures.test.mjs
+    ├── security.test.mjs
+    ├── roundtrip.test.mjs
+    ├── fuzz.test.mjs
     ├── status.test.mjs
     ├── diff.test.mjs
     ├── verify.test.mjs
@@ -253,7 +271,7 @@ mdv/
     └── cross-process.test.mjs
 ```
 
-上述主要模块已存在；M5.5 只新增承载真实图片规则/I/O 的两个 resource 文件，未预建空目录或 provider 接口。同一文件明显变得难读时再拆分。
+上述主要模块已存在；M5.5 只新增承载真实图片规则/I/O 的两个 resource 文件。M6 只补工程脚本、测试与文档，不改生产分层：scripts 是维护者检查入口，不是供 agent 装配的 CLI，也不进入 package exports。同一文件明显变得难读时再拆分。
 
 `package.json` 只有 Library export，不声明 `bin`：
 

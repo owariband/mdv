@@ -21,7 +21,9 @@ test('parallel imports converge on complete immutable files without leaving temp
     [IMAGE.location.fileName, other.location.fileName].sort())
   assert.deepEqual(Buffer.from(await readResource(base, IMAGE.location, 1024)), PNG)
   assert.equal(await resolveResource(base, IMAGE.location), join(base, IMAGE.location.relativePath))
-  assert.equal((await stat(join(base, IMAGE.location.relativePath))).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(base, IMAGE.location.relativePath))).mode & 0o777, 0o600)
+  }
 })
 
 test('corrupted targets are reported and never overwritten by another import', async (t) => {
@@ -38,39 +40,41 @@ test('corrupted targets are reported and never overwritten by another import', a
   }
 })
 
-test('sidecar directories and files cannot redirect access through symlinks', {
-  skip: process.platform === 'win32' ? 'requires POSIX symlink permissions' : false,
-}, async (t) => {
-  for (const level of ['assets', 'document', 'file']) {
+for (const level of ['assets', 'document', 'file']) {
+  test(`sidecar ${level} cannot redirect access through symlinks/junctions`, async (t) => {
     const base = await temporaryDirectory(t)
     const outside = await temporaryDirectory(t)
     const assets = join(base, '.mdv-assets')
     const document = resourceDirectory(base)
     if (level === 'assets') {
-      await symlink(outside, assets)
+      await symlink(outside, assets, process.platform === 'win32' ? 'junction' : 'dir')
     } else if (level === 'document') {
       await mkdir(assets)
-      await symlink(outside, document)
+      await symlink(outside, document, process.platform === 'win32' ? 'junction' : 'dir')
     } else {
       await mkdir(document, { recursive: true })
       const original = join(outside, 'original.png')
       await writeFile(original, PNG)
-      await symlink(original, join(document, IMAGE.location.fileName))
+      try {
+        await symlink(original, join(document, IMAGE.location.fileName), 'file')
+      } catch (error) {
+        if (process.platform !== 'win32' || error.code !== 'EPERM') throw error
+        t.skip('Windows file symlinks require Developer Mode or SeCreateSymbolicLinkPrivilege')
+        return
+      }
     }
     const before = await readdir(outside)
     await assert.rejects(importResource(base, IMAGE), { code: 'INVALID_RESOURCE' }, level)
     await assert.rejects(readResource(base, IMAGE.location, 1024), { code: 'INVALID_RESOURCE' }, level)
     await assert.rejects(resolveResource(base, IMAGE.location), { code: 'INVALID_RESOURCE' }, level)
     assert.deepEqual(await readdir(outside), before)
-  }
-})
+  })
+}
 
-test('non-regular targets are refused while legitimate base-directory aliases work', {
-  skip: process.platform === 'win32' ? 'requires POSIX symlink permissions' : false,
-}, async (t) => {
+test('non-regular targets are refused while legitimate base-directory aliases work', async (t) => {
   const base = await temporaryDirectory(t)
   const alias = join(await temporaryDirectory(t), 'alias')
-  await symlink(base, alias)
+  await symlink(base, alias, process.platform === 'win32' ? 'junction' : 'dir')
   await importResource(alias, IMAGE)
   const target = join(base, IMAGE.location.relativePath)
   assert.equal(await resolveResource(alias, IMAGE.location), target)
@@ -189,9 +193,7 @@ test('corrupted or replaced temporary resources are rejected before publication'
   }
 })
 
-test('retargeted resource directories block publication and unsafe cleanup', {
-  skip: process.platform === 'win32' ? 'requires POSIX symlink permissions' : false,
-}, async (t) => {
+test('retargeted resource directories block publication and unsafe cleanup', async (t) => {
   const base = await temporaryDirectory(t)
   const outside = await temporaryDirectory(t)
   await assert.rejects(importResource(base, IMAGE, {
@@ -199,7 +201,7 @@ test('retargeted resource directories block publication and unsafe cleanup', {
       if (stage === 'before-publish') {
         const directory = dirname(tempPath)
         await rename(directory, `${directory}.old`)
-        await symlink(outside, directory)
+        await symlink(outside, directory, process.platform === 'win32' ? 'junction' : 'dir')
       }
     },
   }), (error) => {

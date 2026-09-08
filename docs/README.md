@@ -2,7 +2,7 @@
 
 这里是 `@mdv/core` 调用方文档，只描述当前代码已经提供的能力。未来设计、尚未实现的 API 和开发排期统一放在[维护者设计区](./design/index.md)，避免设计草案被误认为可用功能。
 
-> 当前实现阶段：M5.5 已完成。当前 package export 可以创建、打开、读取、trace、save、commit、checkout，并提供结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片导入/解析/读取/校验；发布硬化仍属于 M6。
+> 当前实现阶段：M5.5 产品能力已完成；M6 的安全、安装、基准与 CI 工程检查已实现，远端平台验证与发布决策尚待收口。正式 npm 包还未发布。
 
 ## 从哪里开始
 
@@ -12,6 +12,9 @@
 | 理解双工作副本、版本和 bind | [核心概念](./concepts.md) |
 | 查询、保存、类型与错误码 | [当前 API 参考](./api-reference.md) |
 | 正确处理图片和相对路径 | [图片与相对资源](./resources.md) |
+| 确认环境、错误契约与默认限制 | [兼容性与平台边界](./compatibility.md) |
+| 评估历史规模与保存成本 | [性能基线](./performance.md) |
+| 运行工程检查或准备发布 | [验证与发布检查](./releasing.md) |
 | 实现其他语言的兼容 Reader/Writer | [Container Format 0.1](../spec/format-0.1.md) |
 | 参与 Core 设计和后续开发 | [维护者设计索引](./design/index.md) |
 

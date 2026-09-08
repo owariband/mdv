@@ -4,6 +4,8 @@
 
 ## 2026-09-08
 
+- 落地 M6 工程硬化：15 组可重复 fixtures、conformance/安全/复杂 Markdown/有界 fuzz、干净源码 tarball 与 TS consumer、六场景基准、三系统 CI 配置和 release gate。未修改生产代码或 Format 0.1。
+- 新增兼容性、性能与发布检查文档，记录 D012，并保持 O003 开放；区分本地已验证、CI 待实跑与 owner 发布决策，M6 不冒进标记为正式发布完成。
 - 完成 M5：从 package root 提供 `getStatus()`、`readContent(ContentSpec)`、通用 `diff()` 与顶层 `verifyMdv()`，并导出全部 readonly public types。
 - status 以原始 bytes 长度/SHA-256 判断两棵工作副本 dirty，用四态联合精确区分无 Document Head、unbound、aligned 与 drifted；新增 Reference Head 为 `null` 的合法 drift fixture。
 - Diff 采用无第三方依赖的 bounded Myers，支持任意两份工作副本/Version 的同树或跨树比较，保留 CRLF/LF/CR、Unicode 和 EOF newline，并对输入、行数、编辑距离、hunk 和输出实施硬上限。

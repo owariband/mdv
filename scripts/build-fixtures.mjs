@@ -1,58 +1,64 @@
-import { execFileSync } from 'node:child_process'
+import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import yazl from 'yazl'
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const fixtureRoot = join(projectRoot, 'fixtures')
-const temporaryRoot = mkdtempSync(join(tmpdir(), 'mdv-fixtures-'))
-const fixtureTimestamp = new Date('2000-01-01T00:00:00Z')
+const check = process.argv.includes('--check')
+assert.ok(process.argv.slice(2).every((arg) => arg === '--check'), 'usage: node scripts/build-fixtures.mjs [--check]')
+// DOS timestamps are local-time fields: use the same wall clock in every timezone.
+const fixtureTimestamp = new Date(2000, 0, 1, 0, 0, 0)
 
-try {
-  mkdirSync(join(fixtureRoot, 'valid'), { recursive: true })
-  mkdirSync(join(fixtureRoot, 'invalid'), { recursive: true })
+await buildArchive('empty', 'valid', emptyEntries())
+await buildArchive('unbound-document', 'valid', unboundDocumentEntries())
+await buildArchive('drifted-no-reference-head', 'valid', driftedNoReferenceHeadEntries())
+await buildArchive('bound-history', 'valid', boundHistoryEntries())
+await buildArchive('invalid-manifest', 'invalid', invalidManifestEntries())
+await buildArchive('dangling-reference', 'invalid', danglingReferenceEntries())
+await buildArchive('markdown-bom', 'invalid', markdownBomEntries())
+await buildArchive('content-hash-mismatch', 'invalid', contentHashMismatchEntries())
+await buildArchive('unsupported-version', 'invalid', unsupportedVersionEntries())
+await buildArchive('malformed-version', 'invalid', malformedVersionEntries())
+await buildArchive('duplicate-json-key', 'invalid', {
+  ...emptyEntries(), 'manifest.json': Buffer.from('{"format":"mdv","for\\u006dat":"mdv"}'),
+})
+await buildArchive('invalid-utf8', 'invalid', {
+  ...emptyEntries(), 'doc_tree/current.md': Buffer.from([0xc3, 0x28]),
+})
+await buildArchive('dangling-head', 'invalid', {
+  ...emptyEntries(), 'doc_tree/HEAD': Buffer.from(`v_${'1'.repeat(32)}\n`),
+})
+const missingCurrent = emptyEntries()
+delete missingCurrent['ref_tree/current.md']
+await buildArchive('missing-current', 'invalid', missingCurrent)
+const parentCycle = documentEntries(null)
+const cycleMetaPath = Object.keys(parentCycle).find((name) => name.endsWith('/meta.json'))
+const cycleMeta = JSON.parse(parentCycle[cycleMetaPath])
+parentCycle[cycleMetaPath] = json({ ...cycleMeta, parent: cycleMeta.id })
+await buildArchive('parent-cycle', 'invalid', parentCycle)
+console.log(`Fixtures ${check ? 'match' : 'generated'} (deterministic ZIP32, no system zip command).`)
 
-  buildArchive('empty', 'valid', emptyEntries())
-  buildArchive('unbound-document', 'valid', unboundDocumentEntries())
-  buildArchive('drifted-no-reference-head', 'valid', driftedNoReferenceHeadEntries())
-  buildArchive('bound-history', 'valid', boundHistoryEntries())
-  buildArchive('invalid-manifest', 'invalid', invalidManifestEntries())
-  buildArchive('dangling-reference', 'invalid', danglingReferenceEntries())
-  buildArchive('markdown-bom', 'invalid', markdownBomEntries())
-  buildArchive('content-hash-mismatch', 'invalid', contentHashMismatchEntries())
-  buildArchive('unsupported-version', 'invalid', unsupportedVersionEntries())
-  buildArchive('malformed-version', 'invalid', malformedVersionEntries())
-} finally {
-  rmSync(temporaryRoot, { recursive: true, force: true })
-}
-
-function buildArchive(name, kind, entries) {
-  const source = join(temporaryRoot, `${kind}-${name}`)
-  const temporaryArchive = join(temporaryRoot, `${kind}-${name}.mdv`)
-  mkdirSync(source, { recursive: true })
-
-  const names = Object.keys(entries).sort()
-  for (const entryName of names) {
-    const target = join(source, entryName)
-    mkdirSync(dirname(target), { recursive: true })
-    writeFileSync(target, entries[entryName])
-    utimesSync(target, fixtureTimestamp, fixtureTimestamp)
+async function buildArchive(name, kind, entries) {
+  // Deliberately independent of the Core writer so fixtures can detect its regressions.
+  const zip = new yazl.ZipFile()
+  for (const entryName of Object.keys(entries).sort()) {
+    zip.addBuffer(entries[entryName], entryName, {
+      compress: false, mtime: fixtureTimestamp, forceDosTimestamp: true, mode: 0o100600,
+    })
   }
-
-  execFileSync('/usr/bin/zip', ['-X', '-0', '-q', temporaryArchive, ...names], {
-    cwd: source,
-    env: { ...process.env, TZ: 'UTC' },
-  })
-  copyFileSync(temporaryArchive, join(fixtureRoot, kind, `${name}.mdv`))
+  zip.end()
+  const chunks = []
+  for await (const chunk of zip.outputStream) chunks.push(chunk)
+  const bytes = Buffer.concat(chunks)
+  const path = join(fixtureRoot, kind, `${name}.mdv`)
+  if (check) assert.deepEqual(bytes, await readFile(path), `${path}: run npm run fixtures`)
+  else {
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, bytes)
+  }
 }
 
 function emptyEntries() {

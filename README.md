@@ -6,7 +6,7 @@
 
 MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@mdv/core` 是它的 TypeScript 参考实现。
 
-> 当前状态：开发预览。M5 已完成：当前 package root 已支持创建、读取、保存、commit、checkout、历史 trace、结构化 status、任意内容选择与 Diff，以及完整性诊断；受管图片资源和正式 npm 发布尚未完成。
+> 当前状态：开发预览。M5.5 产品能力已完成，包含双树读写、显式版本/bind、trace、Diff/诊断与受管图片。M6 已补充安装验证、安全回归、性能基线和 CI 配置；远端矩阵结果、发布身份/License 与正式 npm 发布仍待收口。
 
 ## 为什么使用 MDV
 
@@ -91,6 +91,9 @@ npm install /absolute/path/to/mdv
 - [核心概念](docs/concepts.md)
 - [当前 API 参考](docs/api-reference.md)
 - [图片与相对资源](docs/resources.md)
+- [兼容性与平台边界](docs/compatibility.md)
+- [性能基线](docs/performance.md)
+- [验证与发布检查](docs/releasing.md)
 - [MDV Container Format 0.1](spec/format-0.1.md)
 - [维护者设计资料](docs/design/index.md)
 
@@ -98,12 +101,13 @@ npm install /absolute/path/to/mdv
 
 ```bash
 npm run fixtures
-npm test
-npm run typecheck
+npm run check
+npm run test:package
+npm run bench -- --quick
 ```
 
 开发路线见[内部路线图](docs/design/roadmap.md)。VS Code extension、MarkText adapter 和 CLI 都是 Core 的上游项目，不属于本包的内部层次。
 
 ## 发布与许可证状态
 
-仓库当前版本为 `0.0.0-development`，`package.json` 仍为 `UNLICENSED`。正式包名、许可证、发布生命周期和兼容性承诺将在稳定发布阶段确定；在此之前不要把当前 API 当作 0.1 稳定承诺。
+仓库当前版本为 `0.0.0-development`，`package.json` 仍为 `UNLICENSED`。构建/发布检查生命周期已经建立；正式包名/scope、许可证与发布版本仍需 owner 决定。`npm run check:release -- --release` 在这些条件未满足时会失败，不会自动发布；在此之前不要把当前 API 当作 0.1 稳定承诺。

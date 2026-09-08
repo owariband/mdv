@@ -210,21 +210,19 @@ test('moving the MDV and its sidecar preserves relative references', async (t) =
   assert.deepEqual(Buffer.from((await moved.readManagedResource(image)).bytes), PNG)
 })
 
-test('retargeting a parent alias rejects resource operations on the old file handle', {
-  skip: process.platform === 'win32' ? 'requires POSIX symlink permissions' : false,
-}, async (t) => {
+test('retargeting a parent alias rejects resource operations on the old file handle', async (t) => {
   const { base } = await setup(t)
   const first = join(base, 'first')
   const second = join(base, 'second')
   const alias = join(base, 'alias')
   await mkdir(first)
   await mkdir(second)
-  await symlink(first, alias)
+  await symlink(first, alias, process.platform === 'win32' ? 'junction' : 'dir')
   const document = await createMdv(join(alias, 'alias.mdv'))
   const image = await document.importManagedResource({ bytes: PNG })
   assert.equal(await document.resolveManagedResource(image), join(first, image))
   await unlink(alias)
-  await symlink(second, alias)
+  await symlink(second, alias, process.platform === 'win32' ? 'junction' : 'dir')
   await assert.rejects(document.importManagedResource({ bytes: GIF }), isError('CONFLICT'))
   await assert.rejects(document.readManagedResource(image), isError('CONFLICT'))
   assert.deepEqual(await readdir(second), [])

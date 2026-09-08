@@ -123,12 +123,18 @@ test('existing path aliases use the filesystem final path for one lock identity'
   })
 })
 
-test('save rejects a symlink target without changing the linked package', async () => {
+test('save rejects a symlink target without changing the linked package', async (t) => {
   await withTemporaryDirectory(async (directory) => {
     const packagePath = join(directory, 'real.mdv')
     const linkPath = join(directory, 'link.mdv')
     await createMdv(packagePath)
-    await symlink(packagePath, linkPath)
+    try {
+      await symlink(packagePath, linkPath, 'file')
+    } catch (error) {
+      if (process.platform !== 'win32' || error.code !== 'EPERM') throw error
+      t.skip('Windows file symlinks require Developer Mode or SeCreateSymbolicLinkPrivilege')
+      return
+    }
     const before = await readFile(packagePath)
 
     const linked = await openMdv(linkPath)

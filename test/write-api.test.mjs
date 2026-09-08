@@ -211,13 +211,13 @@ test('rejects a handle after its parent-directory symlink is retargeted', async 
   const aliasDirectory = join(directory, 'current')
   await mkdir(firstDirectory)
   await mkdir(secondDirectory)
-  await symlink(firstDirectory, aliasDirectory, 'dir')
+  await symlink(firstDirectory, aliasDirectory, process.platform === 'win32' ? 'junction' : 'dir')
 
   const aliasedPath = join(aliasDirectory, 'document.mdv')
   const original = await createMdv(aliasedPath)
   const replacement = await createMdv(join(secondDirectory, 'document.mdv'))
   await unlink(aliasDirectory)
-  await symlink(secondDirectory, aliasDirectory, 'dir')
+  await symlink(secondDirectory, aliasDirectory, process.platform === 'win32' ? 'junction' : 'dir')
 
   await assert.rejects(
     original.saveReference({ markdown: '# must not move\n', expectedGeneration: 0 }),

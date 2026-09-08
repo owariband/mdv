@@ -32,8 +32,9 @@
 - 所属阶段：M6
 - Owner：Repository owner
 - 问题：最终 npm scope、0.1 版本策略、发布权限和开源许可证。
-- 当前阻塞：`package.json` 仍为 `0.0.0-development` 与 `UNLICENSED`。
-- 下一检查：package smoke test 与 CI 完成后、首次正式发布前决定。
+- 当前阻塞：`package.json` 仍为 `0.0.0-development` 与 `UNLICENSED`，没有 owner 审阅后的 LICENSE。M6 已实现开发态/严格 release gate，严格模式按预期拒绝通过。
+- 已有证据：干净源码 tarball runtime 与双 TypeScript consumer 已通过，CI 三平台矩阵已配置但尚待远端结果；见[发布检查](../releasing.md)。
+- 下一检查：推送并确认 CI 后、首次正式发布前由 owner 决定；技术检查不替代 scope 权限或 License 审阅。
 
 ## O004：资源随单文件携带
 

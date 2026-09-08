@@ -8,11 +8,11 @@
 
 ## 当前综合结论
 
-MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 已完成 M5.5：创建、读取、普通 Markdown 工作副本保存、commit、checkout、trace、结构化 status、统一内容选择、通用 Diff、完整性诊断与受管图片 sidecar 均已从 package root 提供；下一阶段是 M6 稳定发布硬化。
+MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 已完成 M5.5 产品能力；M6 已补充 conformance/安全/复杂 Markdown/fuzz、干净源码 tarball consumer、性能基线、CI 与发布 gate，未修改公开 API 或生产分层。当前仍为开发预览，远端平台矩阵和 owner 发布身份决策待验收。
 
 M4 没有增加另一套 Draft 模型：编辑器内存 buffer 归宿主，Core 只持久化 `current.md`，显式 commit 才创建 Version。多进程写冲突由 Core 报告 `CONFLICT`，重载或合并策略仍由宿主决定。
 
-M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务。人类侧 Reference/Document 左右对照的核心仍是 bind + 精确读取，具体 mode 和渲染属于上游插件。M5.5 已补齐可选图片 hash sidecar：普通路径仍由宿主自由管理，受管图片由 Core 导入并返回相对路径，resolve 返回真实本地绝对路径。M6 继续完成一致性、性能、CI、发布身份与兼容性收口；验收后才达到本轮 `@mdv/core 0.1` 稳定发布口径。
+M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务。人类侧 Reference/Document 左右对照的核心仍是 bind + 精确读取，具体 mode 和渲染属于上游插件。M5.5 已补齐可选图片 hash sidecar：普通路径仍由宿主自由管理，受管图片由 Core 导入并返回相对路径，resolve 返回真实本地绝对路径。M6 本地检查通过不等于已经发布；远端 CI、scope/License/版本与发布验收完成后才达到本轮 `@mdv/core 0.1` 稳定发布口径。
 
 ## 页面
 
@@ -23,6 +23,7 @@ M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务�
 - [设计决策](./decisions.md)：已经确认的长期决策、理由和影响。
 - [开放问题](./open-questions.md)：尚未冻结的契约、阻塞项和下一次检查点。
 - [设计维护日志](./log.md)：对本设计知识根的简要变更记录。
+- [兼容性与平台](../compatibility.md)、[性能基线](../performance.md)、[验证与发布](../releasing.md)：M6 的调用方边界、实测证据与可执行检查入口。
 
 ## 事实优先级
 

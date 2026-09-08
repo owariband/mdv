@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-08T05:45:23.420Z",
+  "node": "v26.3.0",
+  "platform": "darwin",
+  "release": "25.4.0",
+  "arch": "arm64",
+  "cpu": "Apple M5 Pro",
+  "repetitions": 3,
+  "statistic": "median",
+  "rssUnit": "KiB",
+  "notes": "Local warm-cache baseline, not an SLA. Peak RSS covers the entire worker, not each operation. Versions = initial total across both trees.",
+  "results": [
+    {
+      "versions": 10,
+      "contentBytes": 2048,
+      "archiveBytes": 32696,
+      "medianMs": {
+        "open": 1.548,
+        "historyRead": 0.84,
+        "trace": 0.014,
+        "fullVerify": 1.906,
+        "save": 21.42,
+        "commit": 20.996
+      },
+      "samplesMs": {
+        "open": [
+          12.914,
+          1.548,
+          1.433
+        ],
+        "historyRead": [
+          1.433,
+          0.84,
+          0.694
+        ],
+        "trace": [
+          0.06,
+          0.014,
+          0.007
+        ],
+        "fullVerify": [
+          2.51,
+          1.906,
+          1.708
+        ],
+        "save": [
+          33.675,
+          21.42,
+          21.265
+        ],
+        "commit": [
+          22.168,
+          20.996,
+          19.898
+        ]
+      },
+      "peakRssKiB": 77488
+    },
+    {
+      "versions": 10,
+      "contentBytes": 65536,
+      "archiveBytes": 794562,
+      "medianMs": {
+        "open": 1.73,
+        "historyRead": 0.733,
+        "trace": 0.008,
+        "fullVerify": 2.156,
+        "save": 22.663,
+        "commit": 24.014
+      },
+      "samplesMs": {
+        "open": [
+          11.435,
+          1.669,
+          1.73
+        ],
+        "historyRead": [
+          1.443,
+          0.649,
+          0.733
+        ],
+        "trace": [
+          0.051,
+          0.008,
+          0.006
+        ],
+        "fullVerify": [
+          5.68,
+          1.945,
+          2.156
+        ],
+        "save": [
+          28.684,
+          22.663,
+          22.333
+        ],
+        "commit": [
+          24.087,
+          22.003,
+          24.014
+        ]
+      },
+      "peakRssKiB": 94208
+    },
+    {
+      "versions": 100,
+      "contentBytes": 2048,
+      "archiveBytes": 283967,
+      "medianMs": {
+        "open": 11.04,
+        "historyRead": 4.039,
+        "trace": 0.022,
+        "fullVerify": 11.15,
+        "save": 64.609,
+        "commit": 59.857
+      },
+      "samplesMs": {
+        "open": [
+          22.098,
+          7.294,
+          11.04
+        ],
+        "historyRead": [
+          4.781,
+          3.591,
+          4.039
+        ],
+        "trace": [
+          0.058,
+          0.011,
+          0.022
+        ],
+        "fullVerify": [
+          13.113,
+          9.534,
+          11.15
+        ],
+        "save": [
+          73.526,
+          56.604,
+          64.609
+        ],
+        "commit": [
+          59.857,
+          56.083,
+          60.942
+        ]
+      },
+      "peakRssKiB": 109248
+    },
+    {
+      "versions": 100,
+      "contentBytes": 65536,
+      "archiveBytes": 6759843,
+      "medianMs": {
+        "open": 8.438,
+        "historyRead": 4.204,
+        "trace": 0.024,
+        "fullVerify": 13.136,
+        "save": 86.363,
+        "commit": 85.938
+      },
+      "samplesMs": {
+        "open": [
+          23.182,
+          8.438,
+          7.698
+        ],
+        "historyRead": [
+          6.908,
+          4.204,
+          3.953
+        ],
+        "trace": [
+          0.073,
+          0.024,
+          0.017
+        ],
+        "fullVerify": [
+          18.275,
+          13.136,
+          12.983
+        ],
+        "save": [
+          99.088,
+          84.935,
+          86.363
+        ],
+        "commit": [
+          85.938,
+          82.956,
+          86.015
+        ]
+      },
+      "peakRssKiB": 125440
+    },
+    {
+      "versions": 1000,
+      "contentBytes": 2048,
+      "archiveBytes": 2797568,
+      "medianMs": {
+        "open": 64.841,
+        "historyRead": 32.734,
+        "trace": 0.098,
+        "fullVerify": 88.342,
+        "save": 402.822,
+        "commit": 396.368
+      },
+      "samplesMs": {
+        "open": [
+          92.954,
+          64.841,
+          62.661
+        ],
+        "historyRead": [
+          35.145,
+          32.734,
+          31.742
+        ],
+        "trace": [
+          0.104,
+          0.098,
+          0.037
+        ],
+        "fullVerify": [
+          96.365,
+          88.342,
+          82.517
+        ],
+        "save": [
+          433.598,
+          402.256,
+          402.822
+        ],
+        "commit": [
+          415.324,
+          396.368,
+          393.884
+        ]
+      },
+      "peakRssKiB": 205120
+    },
+    {
+      "versions": 1000,
+      "contentBytes": 65536,
+      "archiveBytes": 66413544,
+      "medianMs": {
+        "open": 68.609,
+        "historyRead": 35.66,
+        "trace": 0.121,
+        "fullVerify": 124.96,
+        "save": 648.174,
+        "commit": 671.43
+      },
+      "samplesMs": {
+        "open": [
+          97.254,
+          68.609,
+          67.402
+        ],
+        "historyRead": [
+          36.487,
+          35.66,
+          32.441
+        ],
+        "trace": [
+          0.121,
+          0.148,
+          0.107
+        ],
+        "fullVerify": [
+          132.135,
+          124.96,
+          121.09
+        ],
+        "save": [
+          712.79,
+          648.174,
+          645.995
+        ],
+        "commit": [
+          678.632,
+          646.479,
+          671.43
+        ]
+      },
+      "peakRssKiB": 227840
+    }
+  ]
+}
