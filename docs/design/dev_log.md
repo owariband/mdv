@@ -11,11 +11,11 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
-## M5.5 — `feat: complete M5.5 managed image sidecars`（待记录提交 SHA）
+## `c8c30b6` — `feat: complete M5.5 managed image sidecars`
 
+- 完整 SHA：`c8c30b6d7991f2fe3f6abafea6378acc132c2316`
 - 日期：2026-09-08
 - 里程碑：M5.5 受管图片 hash sidecar
-- Git 记录：本次按详细标题与逐项正文提交，提交后补充真实 SHA；不重写已经发布的历史。
 
 详细交付：
 

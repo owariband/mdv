@@ -12,6 +12,7 @@
 - 完成 M5.5：四个 `ManagedResource` API、带基准的只读 snapshot、PNG/JPEG/GIF/WebP 内容寻址、不覆盖原子发布与限量 hash 校验；保留普通 Markdown 路径自由，不改 ZIP/版本/Markdown。
 - 新增 D011，关闭 O002，明确 resolve 返回本地绝对路径但不计算 hash；read/verify 消费已校验 bytes。资源和 `.mdv` 是独立事务，无 GC，`verifyMdv(full)` 不检查外部 sidecar。
 - 本轮全量 147 项测试与 typecheck 通过，覆盖真实跨进程导入、发布/清理故障、读取中变化、路径安全和历史图片回读；同步官方文档与设计状态，下一阶段为 M6 发布硬化，不启动上游客户端。
+- 将 M5.5 开发日志关联到真实功能提交 `c8c30b6d7991f2fe3f6abafea6378acc132c2316`，保留详细交付、验证与平台边界；以独立文档提交补记身份，不重写任何历史提交。
 
 ## 2026-09-07
 
