@@ -2,7 +2,7 @@
 
 这里是 `@mdv/core` 调用方文档，只描述当前代码已经提供的能力。未来设计、尚未实现的 API 和开发排期统一放在[维护者设计区](./design/index.md)，避免设计草案被误认为可用功能。
 
-> 当前实现阶段：M5 已完成。当前 package export 可以创建、打开、读取、trace、save、commit、checkout，并提供结构化 status、统一内容选择、通用源码 Diff 与完整性诊断；受管资源属于 M5.5，发布硬化属于 M6。
+> 当前实现阶段：M5.5 已完成。当前 package export 可以创建、打开、读取、trace、save、commit、checkout，并提供结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片导入/解析/读取/校验；发布硬化仍属于 M6。
 
 ## 从哪里开始
 
@@ -33,7 +33,7 @@
 | 统一读取任意工作副本或历史版本 | 可用；`readContent(ContentSpec)` |
 | 比较任意两份 Markdown 源码 | 可用；bounded line Diff，返回 hunks 与 unified text |
 | 诊断容器、版本图和全部历史正文 | 可用；顶层 `verifyMdv()` 提供 metadata/full 模式 |
-| 受管资源导入与校验 API | 尚未实现 |
+| 受管图片导入、路径解析、读取与校验 | 可用；PNG/JPEG/GIF/WebP，外部 hash sidecar |
 | npm 正式发布与稳定兼容承诺 | 尚未完成 |
 
 ## 事实来源

@@ -60,6 +60,8 @@ M4 沿用普通 Markdown 编辑底座，没有引入 `DraftVersion`、`workspace
 
 M5 增加的是通用、只读、Agent-friendly 原语：`getStatus()` 报告两棵工作副本与 bind 漂移，`readContent()` 精确选择任意工作副本或历史 Version，`diff()` 可以比较包括 Document ↔ Document 在内的任意两份来源，顶层 `verifyMdv()` 可诊断无法正常 open 的损坏包。它们不包含 Markdown AST、渲染、Review UI 或 Agent 专属协议。
 
+M5.5 已补齐受管图片：`importManagedResource()` 导入 PNG/JPEG/GIF/WebP 并返回可插入 Markdown 的 hash 相对路径；`resolveManagedResource()` 返回本地绝对路径，`readManagedResource()` / `verifyManagedResource()` 读取并校验内容。图片位于 `.mdv-assets/` 外部目录，不改动 ZIP 或 generation；普通 Markdown 图片路径仍可以自行命名和放置。完整用法见[图片与相对资源](docs/resources.md)。
+
 ## 从源码使用
 
 项目尚未发布到 npm。当前可以从源码构建并作为本地依赖使用：

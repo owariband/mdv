@@ -11,6 +11,34 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
+## M5.5 — `feat: complete M5.5 managed image sidecars`（待记录提交 SHA）
+
+- 日期：2026-09-08
+- 里程碑：M5.5 受管图片 hash sidecar
+- Git 记录：本次按详细标题与逐项正文提交，提交后补充真实 SHA；不重写已经发布的历史。
+
+详细交付：
+
+- 从唯一 `@mdv/core` package root 提供 `MdvDocument.importManagedResource()` 与 `resolveManagedResource()`、`readManagedResource()`、`verifyManagedResource()`；返回可直接插入 Markdown 的相对 hash 路径、本地绝对路径或经校验的资源 bytes。
+- 新增 `LocatedDocumentSnapshot` / `LocatedParseOptions`：显式基准的内存解析只获得 resolve/read/verify，普通 `DocumentSnapshot` 在类型和运行时均无资源方法；资源 import 和 Markdown 写能力仍只属于路径绑定的 `MdvDocument`。
+- 新增 `src/resource/model.ts`，集中实现严格 managed path grammar、当前 documentId 隔离、SHA-256、PNG/JPEG/GIF/WebP 文件头识别与 png/jpg/gif/webp 扩展名。默认单资源上限 32 MiB，逐次 `maxBytes` 可覆盖；可选 MIME 是断言，不依赖文件名，也不做完整图片解码。
+- 新增 `src/resource/store.ts`，使用私有同目录临时文件、回读校验、fsync 与 hard-link 不覆盖发布。相同图片可以同进程或跨进程并发幂等导入；既有 hash 文件必须验证且 bytes 一致才能复用，损坏目标不覆盖。
+- 受管 I/O 拒绝内部 symlink/非普通目标，检查目录身份，使用同一文件句柄限量读取并检测读取中变化；基准目录本身的合法 alias 可规范化。nlink 大于 1 不直接拒绝，因为原子发布会临时产生第二个 link。
+- 新增 `INVALID_RESOURCE`，其余失败沿用 NOT_FOUND、LIMIT_EXCEEDED、INTEGRITY_MISMATCH、CONFLICT 和 IO_ERROR。发布后或确认复用后的失败携带 `committed: true`，清理失败保留 `cleanupFailures`；检测到目录替换时不沿新路径做危险清理。
+- import 不修改 `.mdv`、generation、Head、版本或 Markdown，不获取包 writer lock。旧 generation 的同文档 handle 可导入，后续 Markdown save 仍执行 CAS；文档被替换或父目录 alias 被重定向时拒绝旧 handle 的导入。
+- 普通 Markdown 路径可以任意命名、引用父目录、绝对位置和网络 URL；所有 Ref/Doc/current/history 共用 `.mdv` 所在目录作相对基准。只有可选 managed API 受 hash grammar 限制，Core 不生成渲染 URI、不扫描 AST、不重写链接。
+- 同步 README、快速开始、公开 API、资源指南、架构、机制和路线图；新增 D011、关闭 O002，M5.5 标记完成，下一阶段设为 M6 稳定发布硬化。
+
+验证与边界：
+
+- `npm test` 在 macOS / Node.js 26.3.0 下通过 147 项，比 M5 增加 30 项；`npm run typecheck` 通过。
+- 推送前再次执行 `npm run typecheck && npm test`，147 项全部通过；提交只包含本轮 M5.5 的代码、测试和文档，不包含既有 `.gitignore` 改动。
+- 新增模型、存储、package-root 黑盒测试，并扩充真实双进程测试；覆盖格式与大小边界、并发复用、目标损坏不覆盖、symlink、读取中原子替换/原地写入/增长、发布前后故障、清理失败、旧 generation、移动包和历史图片回读。
+- 独立临时目录运行实际 `npm pack`（包含 prepare/build）、安装 tarball 并通过 runtime smoke；外部 TypeScript consumer 验证所有资源类型、parse overload 和禁止只读快照写入的负向类型用例。内部 `resource/*`、`archive/*`、`core/*` 子路径仍被 package exports 拒绝。
+- 未修改 Format 0.1、Schema、Archive writer/transaction、Core 版本规则或 runtime dependencies。没有新增 CLI、插件、Markdown parser/renderer、存储 provider、网络下载或 GC。
+- 资源与 ZIP 是独立事务，先 import 再 save；save 失败可以留下可复用孤立图片。`verifyMdv(full)` 不扫描外部 sidecar，分享时仍需同时携带 `.mdv-assets/<documentId>/`。
+- resolve 只检查解析时刻的路径/存在性，不验证内容 hash 或保证后续外部读取；需要校验后的内容应消费 read 返回 bytes。目录检查不是对同权限恶意进程持续替换目录的沙箱；Windows/跨平台 CI、性能与发布兼容承诺留在 M6。
+
 ## `43b4bef` — `feat: complete M5 agent-friendly review primitives`
 
 - 完整 SHA：`43b4befebc140f91482fe455f4fdca9615c52879`

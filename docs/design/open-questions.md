@@ -17,12 +17,14 @@
 
 ## O002：受管资源的媒体类型与扩展名策略
 
-- 状态：Open
+- 状态：Resolved for M5.5
 - 所属阶段：M5.5
 - Owner：Core maintainer
-- 问题：允许哪些 MIME/扩展名、无扩展输入如何处理、扩展名与真实内容不一致时返回什么错误。
-- 已确认边界：路径必须内容寻址、不可覆盖、由 Core 校验；宿主只负责 paste/drop 和 Markdown 插入。
-- 下一检查：实现最小 `importResource` / `resolveResource` / `readResource` DTO 前冻结；该问题不阻塞 M5 的 Agent-friendly 只读检查与诊断能力。
+- 结论：从 bytes 文件头识别 PNG/JPEG/GIF/WebP，固定 png/jpg/gif/webp 扩展名；可选 MIME 只作断言，无需文件名。默认单资源 32 MiB，每次可通过正安全整数 `maxBytes` 覆盖；不作完整解码或像素安全认证。
+- 公开能力：`importManagedResource`、`resolveManagedResource`、`readManagedResource`、`verifyManagedResource`。带基准的 `LocatedDocumentSnapshot` 只提供后三者，路径绑定 `MdvDocument` 才允许导入。
+- 边界：受管路径内容寻址、不覆盖、不跟随内部 symlink；resolve 检查路径并返回本地绝对路径，read/verify 才检查 hash。普通 Markdown 链接仍由宿主自由命名和定位，SVG/AVIF 等普通引用不受 managed allowlist 限制。
+- 错误：非法路径/导入类型为 `INVALID_RESOURCE`，已存内容损坏为 `INTEGRITY_MISMATCH`，超限为 `LIMIT_EXCEEDED`。发布后失败携带 `committed: true`；没有资源 GC 或跨 ZIP/sidecar 事务。
+- 证据：[资源文档](../resources.md)、[D011](./decisions.md#d011m55-区分普通链接与可选受管图片)、`test/resource-*.test.mjs` 与真实跨进程导入测试。跨平台/发布兼容性仍在 M6 验证。
 
 ## O003：稳定发布身份
 

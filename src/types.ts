@@ -25,6 +25,29 @@ export interface ParseOptions extends OpenOptions {
   readonly baseDirectory?: string
 }
 
+export interface LocatedParseOptions extends ParseOptions {
+  readonly baseDirectory: string
+}
+
+export type ManagedImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+export type ManagedResourcePath =
+  `./.mdv-assets/${DocumentId}/${string}.${'png' | 'jpg' | 'gif' | 'webp'}`
+
+export interface ImportResourceInput {
+  readonly bytes: Uint8Array
+  readonly mediaType?: string
+}
+
+export interface ResourceOptions {
+  readonly maxBytes?: number
+}
+
+export interface ManagedResourceContent {
+  readonly relativePath: ManagedResourcePath
+  readonly mediaType: ManagedImageMediaType
+  readonly bytes: Uint8Array
+}
+
 export interface CreateOptions extends OpenOptions {
   readonly markdownProfile?: string
 }
@@ -258,10 +281,18 @@ export interface DocumentSnapshot {
   readVersionText(id: VersionId): Promise<string>
 }
 
-export interface MdvDocument extends DocumentSnapshot {
-  readonly packagePath: string
+export interface LocatedDocumentSnapshot extends DocumentSnapshot {
   readonly baseDirectory: string
 
+  resolveManagedResource(relativePath: string): Promise<string>
+  readManagedResource(relativePath: string, options?: ResourceOptions): Promise<ManagedResourceContent>
+  verifyManagedResource(relativePath: string, options?: ResourceOptions): Promise<void>
+}
+
+export interface MdvDocument extends LocatedDocumentSnapshot {
+  readonly packagePath: string
+
+  importManagedResource(input: ImportResourceInput, options?: ResourceOptions): Promise<ManagedResourcePath>
   saveReference(input: SaveInput): Promise<MdvDocument>
   saveDocument(input: SaveInput): Promise<MdvDocument>
   commitReference(input: CommitInput): Promise<CommitResult>

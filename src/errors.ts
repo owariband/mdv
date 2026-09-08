@@ -7,6 +7,7 @@ export type MdvErrorCode =
   | 'INVALID_VERSION'
   | 'INVALID_GRAPH'
   | 'INVALID_UTF8'
+  | 'INVALID_RESOURCE'
   | 'INTEGRITY_MISMATCH'
   | 'NOT_FOUND'
   | 'LIMIT_EXCEEDED'
@@ -31,4 +32,3 @@ export class MdvError extends Error {
     this.details = Object.freeze({ ...(options.details ?? {}) })
   }
 }
-

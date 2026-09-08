@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-08
 >
-> 当前里程碑：M5「Agent-friendly 审阅与诊断能力」已完成；下一步为 M5.5「受管资源 sidecar」
+> 当前里程碑：M5.5「受管资源 sidecar」已完成；下一步为 M6「稳定发布硬化」
 >
 > 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件
 >
@@ -42,11 +42,11 @@
 | M3 创建、保存与文件事务 | 完成 | create/save、确定性 ZIP Writer、锁内双重 CAS、临时包全验、fsync 与原子替换 | Windows 目录项 crash durability 尚未达到 POSIX 同等级保证 |
 | M4 Commit 与 Checkout | 完成 | Core commands、有限 mutation、四个 package-root API、分叉与并发测试 | 后续 Agent-friendly status、Diff 与诊断 verify 留在 M5 |
 | M5 Agent-friendly 审阅与诊断 | 完成 | 结构化 status、统一 `ContentSpec`、bounded line Diff、metadata/full `verifyMdv` 与 package-root 测试 | 默认限制与诊断边界已记录；后续稳定兼容承诺留到 M6 |
-| M5.5 受管资源 sidecar | 未开始 | `baseDirectory`、documentId 和内容寻址约定已经明确 | import/resolve/read/verify API 与原子 sidecar 写入尚未实现 |
-| M6 稳定发布 | 未开始 | `prepare`、tarball consumer smoke 与调用方文档已建立 | 完整 fixtures、fuzz/性能、CI matrix、正式发布与兼容性承诺未完成 |
-| U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端；bind + 内容读取已经能支撑左右对照，具体 mode 属于 extension | M5 已完成；等待 M5.5 和 M6 形成 Core 0.1 稳定闭环 |
+| M5.5 受管资源 sidecar | 完成 | 四个 `ManagedResource` API、located 只读快照、hash 校验、不覆盖原子发布与资源闭环测试 | POSIX/Windows 支持矩阵与长期兼容承诺留到 M6 |
+| M6 稳定发布 | 下一步 | `prepare`、tarball consumer smoke 与调用方文档已建立 | 完整 fixtures、fuzz/性能、CI matrix、正式发布与兼容性承诺未完成 |
+| U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端；bind + 内容读取与图片 sidecar 已可用，具体 mode 属于 extension | 等待 M6 形成 Core 0.1 稳定发布闭环 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
-| U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游，M4 public write API 与 M5 Agent-friendly API 已可用 | 等待 M5.5 API 与 M6 错误码、诊断码兼容承诺稳定 |
+| U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游，M4/M5/M5.5 public API 已可用 | 等待 M6 错误码、诊断码兼容承诺稳定 |
 
 核心开发依赖顺序为：
 
@@ -471,20 +471,20 @@ M5 完成只表示 Agent/自动化所需的通用审阅与诊断原语已经齐�
 
 ### M5.5：受管图片 hash sidecar
 
-状态：**未开始**
+状态：**完成**
 
 目标：落实已经冻结的外部内容寻址资源约定，让 VS Code、MarkText 等宿主无需各自复制图片存储规则。资源仍是普通 Markdown 相对路径，不进入 `.mdv` ZIP、不增加 manifest generation，也不纳入 Markdown Version 的正文哈希。
 
-实现范围：
+实际交付：
 
-- 提供路径绑定 `MdvDocument` 的资源 import 能力：接收原始 bytes 与受支持的媒体/扩展名信息，计算小写十六进制 SHA-256；
+- 提供路径绑定 `MdvDocument.importManagedResource()`：接收原始 bytes 与可选 MIME 断言，从文件头识别 PNG/JPEG/GIF/WebP，使用 png/jpg/gif/webp 规范扩展名，计算小写十六进制 SHA-256；
 - 将资源原子创建或安全复用到 `.mdv-assets/<documentId>/<sha256>.<extension>`，返回可直接插入 Markdown 的 `./.mdv-assets/...` 相对路径；
-- 冻结最小媒体类型与扩展名 allowlist，拒绝路径分隔符、双扩展名欺骗和不匹配的媒体声明；
+- 冻结每次 import/read/verify 默认 32 MiB 的独立 `ResourceOptions.maxBytes`；文件头识别不承诺完整解码或像素安全，SVG/AVIF 仍可作为普通 Markdown 链接；
 - 同 hash 同扩展名且 bytes 一致时幂等复用；已存在路径内容不一致时报告完整性错误，绝不覆盖；
-- 提供 managed relative path 的 resolve、read 与 verify；只接受当前 documentId 下符合 grammar 的内容寻址路径，不把 API 退化成任意本地文件读取器；
+- 提供 `resolveManagedResource`、`readManagedResource`、`verifyManagedResource`；只接受当前 documentId 下符合 grammar 的内容寻址路径，普通 Markdown 链接仍可自由命名、跨目录和使用绝对路径，由宿主按 `baseDirectory` 处理；
 - 读取和复用时重新计算 hash，拒绝被替换、截断、symlink 绕过或超出资源大小上限的 sidecar；
-- 并发 import 使用 exclusive create/同目录临时文件与原子发布，失败时不留下可被误认为完整资源的目标文件；
-- `parseMdv(bytes)` 没有真实文件绑定时不提供写入；只有显式且可信的 `baseDirectory` 才能用于只读 resolve；
+- 并发 import 使用私有临时文件、回读校验、fsync 与 hard-link 不覆盖发布；目标已存在必须重新验证且 bytes 完全一致；发布后失败报告 `committed: true`，清理失败报告 `cleanupFailures`；
+- `parseMdv(bytes)` 的普通 `DocumentSnapshot` 没有资源方法；显式可信 `baseDirectory` 返回 `LocatedDocumentSnapshot`，只提供 resolve/read/verify。`MdvDocument` 扩展它并增加 import；
 - Core 不监听 paste/drop、不修改 Markdown、不扫描历史引用、不下载网络 URL、不渲染图片，0.1 也不自动垃圾回收孤立资源。
 
 资源文件和 `.mdv` ZIP 无法组成一个跨文件原子事务。宿主 paste 流程应先 import sidecar，再把返回路径插入 buffer 并调用 save；后续 save 失败最多留下可安全复用的孤立 hash 文件，不会产生正文引用一个半写资源的状态。
@@ -493,15 +493,19 @@ M5 完成只表示 Agent/自动化所需的通用审阅与诊断原语已经齐�
 
 - 相同 bytes 重复或并发导入得到同一相对路径，目标内容 byte-for-byte 一致；
 - 不同 bytes 不会覆盖已有 hash path，伪造 hash、错误扩展名、路径穿越、绝对路径、symlink 与超限资源均被拒绝；
-- resolve/read 只在当前 documentId 的受管目录内工作，并在返回内容前完成 hash 校验；
+- resolve/read 只在当前 documentId 的受管目录内工作：resolve 返回经过路径/存在性检查的本地绝对路径，不计算 hash；read/verify 在同一打开句柄上限量读取并校验 hash，返回内容前完成校验；
 - sidecar import/read/verify 不修改 `.mdv` bytes、generation、HEAD 或版本历史；
 - 移动 `.mdv` 但遗漏 `.mdv-assets` 时得到明确 NOT_FOUND/diagnostic，而不是影响 Markdown 自身的读取和校验；
 - package-root 黑盒测试覆盖 `import -> Markdown save -> commit -> checkout old version -> resolve/read same hash resource`；
 - 宿主只负责 paste/drop 和插入 Core 返回的相对路径，不需要知道 sidecar 目录拼接或哈希算法。
 
+验证结果：`npm test` 在 macOS / Node.js 26.3.0 下通过 147 项（比 M5 增加 30 项），`npm run typecheck` 通过。覆盖四种媒体、路径与大小边界、并发幂等、真实双进程导入、读取中替换/增长、symlink、损坏目标不覆盖、发布前后故障、清理失败、旧 generation 与 save CAS、移动包和历史 bind/图片回读。
+
+实现不修改 Format 0.1、Schema、Archive writer/transaction、版本规则或 runtime dependencies；新增 `src/resource/model.ts` 与 `store.ts`，通过现有 facade 编排。路径检查只提供操作时刻的本地安全边界，不承诺抵抗同权限恶意进程持续替换目录；跨平台 CI 与 crash durability 继续由 M6 收口。
+
 ### M6：一致性、性能与发布收口
 
-状态：**未开始**
+状态：**下一步**
 
 目标：把已经完成版本语义、Agent-friendly 检查与受管资源闭环的参考实现，收口为其他项目可以稳定安装、持续验证和安全升级的 Core 0.1 包。M6 原则上不再增加新的主要业务语义。
 
@@ -512,7 +516,7 @@ M5 完成只表示 Agent/自动化所需的通用审阅与诊断原语已经齐�
 - 增加 Archive/JSON fuzz 测试，保证任意输入不导致进程崩溃或无界资源使用；
 - 增加复杂 Markdown round-trip：CRLF、中文、front matter、代码块、表格、数学公式和 Mermaid；
 - 增加 `create -> save -> commit -> reopen -> status -> trace -> diff -> verify` 端到端测试；
-- 增加 `import asset -> save Markdown path -> commit -> checkout -> resolve/read/verify asset` 端到端测试；
+- 将 M5.5 已有的 `import asset -> save Markdown path -> commit -> checkout -> resolve/read/verify asset` 端到端测试纳入支持平台 CI，继续扩充故障矩阵；
 - 对真实历史规模做打开、按需读、整包重写的基准测试；
 - 随 API 演进维护现有 README、快速开始和 API 参考，并补齐最终发布示例；
 - 维护已经建立的 npm tarball/Git dependency `prepare` 构建生命周期；
@@ -539,7 +543,7 @@ M6 完成后，可以称 `@mdv/core 0.1` 为本轮设计范围内的完整形态
 
 状态：**等待 Core 0.1 闭环**
 
-VS Code extension 是计划中的第一个图形客户端，但作为独立上游项目，不进入 `@mdv/core`。M5 已完成，当前优先依次完成 M5.5 和 M6，不在 Core 资源规则与发布承诺尚未闭环时并行维护客户端兼容层。
+VS Code extension 是计划中的第一个图形客户端，但作为独立上游项目，不进入 `@mdv/core`。M5.5 已完成，当前优先完成 M6，不在 Core 发布承诺尚未闭环时并行维护客户端兼容层。
 
 未来接入遵守三个边界：
 
@@ -570,21 +574,20 @@ CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
 
 ## 6. 下一批开发任务
 
-M5 已按 `public type -> 纯 Core 规则 -> facade -> Archive 诊断 -> package-root 验收` 完成交付。下一批只进入 M5.5，不同时启动 VS Code、MarkText 或 CLI：
+M5.5 的实现、package-root 验收和官方文档已完成，O002 已关闭。下一批进入 M6，不同时启动 VS Code、MarkText 或 CLI：
 
-1. 先关闭 O002，冻结首批 MIME/扩展名 allowlist、真实内容识别策略、单资源大小上限和稳定错误分类；
-2. 冻结 package-root 的 `importResource`、`resolveResource`、`readResource`、`verifyResource` 最小 DTO，保持路径绑定写入与可选 baseDirectory 只读语义清楚分离；
-3. 实现 `.mdv-assets/<documentId>/<sha256>.<extension>` grammar、路径解析和 documentId 隔离，不接受任意相对/绝对文件读取；
-4. 实现 hash 校验、symlink/路径穿越防护、exclusive create 与同目录临时文件原子发布；
-5. 覆盖重复和并发导入、目标碰撞、错误媒体声明、移动包后资源缺失、读取时篡改与资源上限；
-6. 编写只从 package root 使用的资源闭环测试和官方文档，证明 sidecar 操作不修改 `.mdv` bytes、generation、Head 或历史；
-7. 继续只发布一个 `@mdv/core`，不增加 Markdown AST、paste/drop 监听、网络下载、资源 GC、CLI 或宿主专属 DTO。
+1. 盘点现有 fixtures/测试与 Format 0.1 的缺口，补齐危险 ZIP、严格 JSON、复杂 Markdown 和资源文件边界；
+2. 增加有界 fuzz 与真实历史规模 benchmark，记录可复现输入和结果；
+3. 建立 Node/操作系统 CI matrix，固化现有 package-root 和 tarball runtime/TypeScript consumer 检查；
+4. 验证各平台的 rename/link/fsync、路径 alias、权限与失败恢复，明确 Windows 限制；
+5. 完成 public API、错误/诊断码、默认限制与兼容性审计；
+6. 与仓库 owner 确认 npm scope、发布权限、License 和版本策略后再正式发布，不擅自选择许可证或发布到 registry。
 
-M5.5 开发前先审计其独立文件事务。资源 sidecar 与 `.mdv` 整包替换不是一个跨文件原子事务，不能直接复用 M3 transaction 后宣称两者一起提交；宿主仍按“先导入可复用 hash 资源，再 save Markdown 引用”的顺序编排。
+资源 sidecar 与 `.mdv` 整包替换继续保持独立事务；M6 不改变“先导入可复用 hash 资源，再 save Markdown 引用”的顺序，也不新增增量容器或存储框架。
 
 ## 7. Core 0.1 完成口径
 
-M5 已关闭 Agent-friendly 检查层；剩余 M5.5 与 M6 分别关闭产品资源和稳定发布问题：
+M5 与 M5.5 已关闭 Agent-friendly 检查和产品资源能力；剩余 M6 关闭稳定发布问题：
 
 - **M5 完成**：Agent-friendly 检查能力闭环。Agent/CLI 能读取结构化状态、识别 bind 关系、比较任意 Markdown 来源并诊断完整性；基础的人类读写和 bind 左右对照并不依赖 M5，但图片受管写入和发布承诺还未完成；
 - **M5.5 完成**：本轮产品能力闭环。Core 能安全导入、解析、读取和验证图片 hash sidecar，但仍是待硬化的预发布实现；

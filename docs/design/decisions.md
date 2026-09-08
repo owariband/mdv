@@ -9,7 +9,7 @@
 - 决定：`.mdv` 使用 ZIP 容器；根 `manifest.json` 负责格式识别，不增加独立 `mimetype` entry。
 - 理由：减少重复事实来源，文件扩展名只负责关联，Reader 仍验证 manifest。
 - 影响：Reader 必须把 ZIP 当作不可信输入；格式识别不能只看扩展名。
-- 证据：[Format 0.1](../../spec/format-0.1.md)、[架构 §4](./architecture.md#4-物理格式)
+- 证据：[Format 0.1](../../spec/format-0.1.md)、[架构 §4](./architecture.md#4-mdv-物理格式)
 
 ## D002：Reference 与 Document 使用两棵版本树
 
@@ -87,3 +87,17 @@
 - 人类宿主边界：Reference/Document 左右对照依赖 Document Version 的精确 bind、trace 与内容读取，这些属于 Core；双栏布局、同步滚动、高亮、Markdown 渲染和 Review 交互属于 VS Code/MarkText。M5 对普通人的直接价值较小，也不代表 Core 提供 Review UI。
 - 理由：Agent/CLI 需要无歧义地回答“当前改了什么、成品依赖哪个摘要、任意两份正文差什么、包为何打不开”。由 Core 统一这些确定性计算，可以复用 bind、hash、错误码和 Archive 安全边界，避免每个 Agent tool 产生不同实现；但 Core 不增加 Agent 专属 DTO、prompt 或 token 裁剪策略。
 - 影响：M5 主要修改 public types、facade、纯 Core 计算和 Archive 诊断读取；`mutation.ts`、`writer.ts` 与 `transaction.ts` 不改，`commands.ts` 只允许为 dirty 规则一致性做机械修正。最终 checkout 补上 `contentBytes` 比较，与 status 的长度 + SHA-256 规则一致，没有新增 command 或改变公开事务语义。基础人类读写和 bind 左右对照不以 M5 为前置；受管图片 sidecar 独立在 M5.5 实现，发布兼容性在 M6 收口。
+
+## D011：M5.5 区分普通链接与可选受管图片
+
+- 日期：2026-09-08
+- 状态：Accepted / Implemented
+- 决定：普通 Markdown 路径不受 Core 的命名或目录限制，相对基准统一为 `.mdv` 所在目录。只有主动调用 `importManagedResource` 才使用固定 `.mdv-assets/<documentId>/<sha256>.<extension>`；不增加 path/hash manifest，也不让 managed allowlist 限制普通链接。
+- 媒体：从 bytes 文件头识别 PNG/JPEG/GIF/WebP，扩展名固定 png/jpg/gif/webp；可选 MIME 为断言。默认单资源 32 MiB，可逐次覆盖；不做完整图片解码或像素安全认证。
+- 定位：`resolveManagedResource` 校验路径/存在性并返回本地绝对路径；`readManagedResource` / `verifyManagedResource` 限量读取并验证 hash/类型。宿主负责把路径转成渲染 URI，Core 不扫描 AST 或重写 Markdown。
+- 能力边界：纯 `DocumentSnapshot` 无资源方法；显式 baseDirectory 的 `LocatedDocumentSnapshot` 有三个只读方法；`MdvDocument` 再增加 import。类型和运行时一致，不为内存 snapshot 偷偷赋予文件写能力。
+- 持久化：资源用私有临时文件、回读校验、fsync 与 hard-link 不覆盖发布；竞争时重新校验已有 bytes 并幂等复用，不覆盖坏文件。不按 nlink 大于 1 拒绝资源，因为发布本身会临时产生第二个 link。
+- 一致性：import 不修改 `.mdv`/generation/Head/版本，不需要 CAS；Markdown save 继续 CAS。先 import 再 save，失败可留安全孤立资源，0.1 不 GC。发布后错误携带 `committed: true`；`verifyMdv(full)` 不扫描外部资源。
+- 安全与平台：拒绝受管内部 symlink，允许规范化可信基准 alias；目录身份检查不是对同权限恶意进程的沙箱，返回路径也不是永久资源句柄。macOS 本地路径已测试，其他平台 CI 与 crash durability 在 M6 收口。
+- 理由：保持普通 Markdown 编辑底座，同时集中实现 host 不应各自复制的内容寻址、受限读取与原子发布规则；不用渲染器或泛化存储接口扩大库边界。
+- 证据：[资源文档](../resources.md)、[公开 API](../api-reference.md#受管图片)、[`src/resource/`](../../src/resource/)、[`test/resource-api.test.mjs`](../../test/resource-api.test.mjs)。

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { fork } from 'node:child_process'
 import {
   mkdtemp,
+  readFile,
   readdir,
   rm,
   unlink,
@@ -12,7 +13,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 
-import { openMdv } from '../dist/index.js'
+import { createMdv, openMdv } from '../dist/index.js'
+import { PNG } from './helpers/resources.mjs'
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DIST_ENTRY_URL = pathToFileURL(join(PROJECT_ROOT, 'dist/index.js')).href
@@ -36,6 +38,7 @@ process.once('message', async (message) => {
   try {
     let document
     let version
+    let relativePath
     if (command.action === 'create') {
       document = await createMdv(command.path)
     } else if (command.action === 'save-document') {
@@ -43,6 +46,9 @@ process.once('message', async (message) => {
         markdown: command.markdown,
         expectedGeneration: command.expectedGeneration,
       })
+    } else if (command.action === 'import-resource') {
+      relativePath = await opened.importManagedResource({ bytes: Buffer.from(command.bytes, 'base64') })
+      document = opened
     } else {
       const commit = await opened.commitDocument({
         expectedGeneration: command.expectedGeneration,
@@ -58,6 +64,7 @@ process.once('message', async (message) => {
       ok: true,
       generation: document.manifest.generation,
       ...(version === undefined ? {} : { version }),
+      ...(relativePath === undefined ? {} : { relativePath }),
     })
   } catch (error) {
     finish({
@@ -173,6 +180,28 @@ test('two processes committing one generation create exactly one Document Versio
 
   await unlink(workerPath)
   assert.deepEqual(await readdir(directory), ['commit-race.mdv'])
+})
+
+test('two processes importing the same image both succeed with one immutable sidecar', {
+  timeout: 20_000,
+}, async (t) => {
+  const directory = await temporaryDirectory(t)
+  const path = join(directory, 'resource-race.mdv')
+  const initial = await createMdv(path)
+  const before = await readFile(path)
+  const workerPath = await writeWorker(directory)
+  const command = { action: 'import-resource', path, bytes: PNG.toString('base64') }
+  const results = await runContenders(workerPath, [command, command])
+  assert.equal(results.length, 2)
+  for (const result of results) {
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.equal(result.generation, 0)
+    assert.equal(result.relativePath, results[0].relativePath)
+  }
+  assert.deepEqual(await readFile(join(directory, results[0].relativePath)), PNG)
+  assert.deepEqual(await readFile(path), before)
+  const entries = await readdir(join(directory, '.mdv-assets', initial.manifest.documentId))
+  assert.equal(entries.length, 1)
 })
 
 async function runSingleCreate(workerPath, packagePath) {

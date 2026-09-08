@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5 已完成；create/read/trace/save/commit/checkout、结构化 status、统一内容选择、通用源码 Diff 与完整性诊断均已从 package root 提供。受管资源在 M5.5 单独实现。
+> 实现进度：M5.5 已完成；create/read/trace/save/commit/checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片均已从 package root 提供。下一阶段为 M6 发布硬化。
 
 ## 1. 背景与目标
 
@@ -58,7 +58,7 @@ doc_tree/current.md（可变成品工作副本）
 3. **保存与版本分离**：普通保存只更新工作副本；显式 commit 才增加历史节点。
 4. **历史可追踪**：版本不可变，父版本、绑定的 Reference Version、作者和变化摘要可追溯。
 5. **Agent 友好**：先读取轻量索引，按需读取正文；Agent 可以多次保存草稿后再 commit。
-6. **并发安全**：所有写入使用比较后交换语义和原子替换，不静默覆盖其他写入者。
+6. **并发安全**：MDV 整包写入使用比较后交换语义和原子替换，不静默覆盖其他写入者；独立 hash 图片使用不覆盖原子发布与校验后复用。
 7. **跨实现一致**：文字规范、JSON Schema、合法/非法 fixtures 和参考实现共同约束行为。
 
 ### 1.3 非目标
@@ -314,7 +314,7 @@ Document Version 的 `referenceVersion` 可以落后于 `ref_tree/HEAD`。这是
 
 0.1 不将附件写入包内。Markdown 中的相对链接和图片地址以 `.mdv` 文件所在目录作为基准，而不是以 ZIP 内路径为基准。通过 `readContent(...).bytes` 取得 Markdown 时不隐式复制外部附件。
 
-官方 Core 将在 M5.5 提供外部受管资源能力。导入的图片等资源使用内容寻址 sidecar：
+官方 Core 已在 M5.5 提供可选的外部受管资源能力。普通 Markdown 路径仍可自由命名、引用父目录、绝对位置或网络 URL，由宿主按基准处理；主动导入的 PNG/JPEG/GIF/WebP 图片使用内容寻址 sidecar：
 
 ```text
 example.mdv
@@ -322,6 +322,10 @@ example.mdv
 ```
 
 Markdown 直接记录相对路径 `./.mdv-assets/<documentId>/<sha256>.<extension>`。路径本身就是不可变内容引用，不在 manifest 中重复维护可变的 `path -> hash` 映射。Core 负责资源导入、相对路径解析、读取与 SHA-256 校验；宿主负责 paste/drop、把返回的相对路径插入 Markdown，以及最终渲染。Core 不扫描或解释 Markdown AST。
+
+四个公开方法为 `importManagedResource`、`resolveManagedResource`、`readManagedResource`、`verifyManagedResource`。resolve 检查严格路径、存在性和文件类型，返回本地绝对路径，不计算内容 hash；read/verify 对同一打开句柄限量读取并校验 hash/媒体。import/read/verify 默认单资源 32 MiB。文件头识别不是完整图片解码，渲染 URI 和像素安全仍由宿主负责。详见[资源契约](../resources.md)与 [D011](./decisions.md#d011m55-区分普通链接与可选受管图片)。
+
+sidecar 用私有临时文件、回读验证、fsync 和 hard-link 不覆盖发布；目标已存在必须验证 bytes 完全相同才可复用。它不获取 MDV writer lock 或执行 generation CAS；Markdown save 仍执行原 CAS。先导入再 save，save 失败可以留下安全孤立资源，不伪装成跨文件事务。
 
 资源仍不进入 `.mdv` ZIP，也不计入 Version 的正文哈希。相同 hash 文件只复用、不覆盖，0.1 不自动垃圾回收。只要 sidecar 仍存在，旧版本正文中的 hash 路径即可解析到原资源；单独移动或分享 `.mdv` 仍可能丢失资源。把资源内嵌并纳入版本完整性属于后续格式版本。
 
@@ -382,6 +386,11 @@ interface ReadLimits {
 ```ts
 export function parseMdv(
   bytes: Uint8Array,
+  options: LocatedParseOptions,
+): Promise<LocatedDocumentSnapshot>
+
+export function parseMdv(
+  bytes: Uint8Array,
   options?: ParseOptions,
 ): Promise<DocumentSnapshot>
 
@@ -401,6 +410,8 @@ interface CreateOptions extends OpenOptions {
 ```
 
 `createMdv` 创建 generation 为 0 的空容器；目标路径已存在时以 `CONFLICT` 失败，不能覆盖。创建成功后返回路径绑定的 `MdvDocument`，可以直接读取或保存。
+
+无基准的 `DocumentSnapshot` 不提供资源方法；显式可信 `baseDirectory` 的 `LocatedDocumentSnapshot` 扩展只读 resolve/read/verify，`MdvDocument` 再扩展 import 与已有包写方法。资源能力不引入泛化 provider 或渲染器模型，完整签名以[公开 API 文档](../api-reference.md#受管图片)为准。
 
 ### 6.1 M5 Agent-friendly 只读能力与公开契约
 
@@ -613,7 +624,7 @@ interface SaveInput {
   readonly expectedGeneration: number
 }
 
-interface MdvDocument extends DocumentSnapshot {
+interface MdvDocument extends LocatedDocumentSnapshot {
   saveReference(input: SaveInput): Promise<MdvDocument>
   saveDocument(input: SaveInput): Promise<MdvDocument>
 }
@@ -845,6 +856,7 @@ type MdvErrorCode =
   | 'INVALID_VERSION'
   | 'INVALID_GRAPH'
   | 'INVALID_UTF8'
+  | 'INVALID_RESOURCE'
   | 'INTEGRITY_MISMATCH'
   | 'NOT_FOUND'
   | 'LIMIT_EXCEEDED'
@@ -910,7 +922,10 @@ mdv/
 │   ├── types.ts
 │   ├── errors.ts
 │   ├── core/
-│   └── archive/
+│   ├── archive/
+│   └── resource/
+│       ├── model.ts
+│       └── store.ts
 └── test/
 ```
 
@@ -919,7 +934,8 @@ mdv/
 - `index.ts`、`mdv-document.ts`、`types.ts` 和 `errors.ts`：公开 facade、输入/输出 DTO 与错误码；不暴露 ZIP DTO 或内部可变状态。
 - `core/`：版本图、trace、dirty/漂移、commit/checkout 规则和源文本 Diff；不解析 Markdown，也不执行 ZIP I/O。
 - `archive/`：ZIP/JSON 编解码、格式 DTO、资源限制、锁、generation CAS、临时包校验和原子替换。
-- `index.ts` 只重导出 public API；调用方不能越层导入 `core/` 或 `archive/`。
+- `resource/model.ts`：受管路径 grammar、媒体头识别、单资源上限和 hash；`resource/store.ts`：本地 sidecar 安全读取与不覆盖发布。它是持久化职责的独立模块，不是新的业务层，也不依赖版本图或 ZIP transaction。
+- `index.ts` 只重导出 public API；调用方不能越层导入 `core/`、`archive/` 或 `resource/`。
 
 语义一致性由 `core/` 决定，物理包一致性和写入原子性由 `archive/` 保证。两者不能各自维护一套版本规则。
 
@@ -996,7 +1012,8 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 14. Diff 覆盖所有合法 `ContentSpec` 组合、相同内容、CRLF/LF、末尾换行，以及输入 bytes/行数、编辑长度、输出 bytes、hunk 上限。
 15. `verifyMdv(metadata)` 与 `verifyMdv(full)` 覆盖无法 open 的结构错误、可聚合的独立错误、`maxIssues` 截断、`complete: false`，以及未被普通读取访问的损坏分支正文；不存在和不可读路径继续验证抛错语义。
 16. `save -> commit -> reopen -> getStatus -> diff -> verifyMdv(full) -> readContent` 端到端测试。
-17. 后续 Python 只读实现运行同一套 fixtures，证明格式未绑定 TypeScript。
+17. 资源测试覆盖媒体、严格路径、限量读取、symlink/目录变化、重复/同进程/跨进程导入、发布前后故障、清理失败、损坏目标不覆盖，以及 `import -> save -> commit -> checkout -> read/verify old image`；sidecar 操作不修改 ZIP/Head/generation/历史。
+18. 后续 Python 只读实现运行同一套 fixtures，证明格式未绑定 TypeScript。
 
 宿主编辑器的 `Markdown -> editor state -> Markdown` 稳定性属于对应 adapter 的集成测试。Core 只保证交给它的 Markdown 字节不会被自己改写。
 
@@ -1025,7 +1042,7 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 5. 实现 M3 工作副本 Writer：`createMdv`、`saveReference`、`saveDocument`、generation CAS 和原子替换。
 6. 已实现 M4 `commitReference`、`commitDocument` 和 checkout。
 7. 已实现 M5 `getStatus`、`readContent`、源文本 Diff 与顶层 `verifyMdv`；只复用现有 Reader/Core，不改格式或写事务。
-8. 实现 M5.5 内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
+8. 已实现 M5.5 内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
 9. 完成 M6 fixtures、fuzz、安全、复杂 Markdown 往返、性能、CI、包发布与兼容承诺收口。
 10. Core 0.1 收口后启动独立 VS Code extension；首个宿主验证稳定后再接入 MarkText adapter，CLI/Agent tool 保持独立上游立项。
 

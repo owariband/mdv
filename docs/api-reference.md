@@ -1,13 +1,13 @@
 # 当前 API 参考
 
-本页只记录当前从 `@mdv/core` package root 导出的公开 API。M5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff 和完整性诊断；受管资源与正式发布能力仍属于后续阶段。
+本页只记录当前从 `@mdv/core` package root 导出的公开 API。M5.5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片；正式发布硬化仍属于 M6。
 
 ## 运行环境与入口
 
 - Node.js 20+；
 - ESM；
 - 唯一公开入口：`@mdv/core`；
-- 不支持从 `@mdv/core/archive/*` 或 `@mdv/core/core/*` 导入内部模块。
+- 不支持从 `@mdv/core/archive/*`、`@mdv/core/core/*` 或 `@mdv/core/resource/*` 导入内部模块。
 
 ```ts
 import {
@@ -44,6 +44,11 @@ function createMdv(path: string, options?: CreateOptions): Promise<MdvDocument>
 ```ts
 function parseMdv(
   bytes: Uint8Array,
+  options: LocatedParseOptions,
+): Promise<LocatedDocumentSnapshot>
+
+function parseMdv(
+  bytes: Uint8Array,
   options?: ParseOptions,
 ): Promise<DocumentSnapshot>
 ```
@@ -59,6 +64,10 @@ interface ParseOptions extends OpenOptions {
   readonly baseDirectory?: string
 }
 
+interface LocatedParseOptions extends ParseOptions {
+  readonly baseDirectory: string
+}
+
 interface CreateOptions extends OpenOptions {
   readonly markdownProfile?: string
 }
@@ -66,7 +75,9 @@ interface CreateOptions extends OpenOptions {
 
 ## Snapshot 属性
 
-`DocumentSnapshot` 是 `parseMdv` 返回的纯只读快照。`MdvDocument` 来自路径，因而 `packagePath` 和 `baseDirectory` 一定是字符串，并额外提供 save、commit 和 checkout 写方法。
+`DocumentSnapshot` 是无资源定位能力的只读快照。显式提供 `baseDirectory` 时，`parseMdv` 返回它的子接口 `LocatedDocumentSnapshot`，增加受管资源 resolve/read/verify。`MdvDocument` 再扩展该接口，来自真实路径，`packagePath` 和 `baseDirectory` 一定是字符串，并提供 import/save/commit/checkout。
+
+不传基准的 `parseMdv(bytes)` 在运行时也没有资源方法；传基准不会授予写权限。若变量被显式标注为宽类型 `ParseOptions`，TypeScript 只能保证返回 `DocumentSnapshot`；需要静态资源能力时使用 `LocatedParseOptions` 或含必填基准的对象字面量。
 
 | 属性 | 类型 | 含义 |
 | --- | --- | --- |
@@ -334,7 +345,75 @@ interface VerifyIssue {
 - `maxIssues` 默认为 100，必须是正安全整数。达到上限且仍有内容未检查时，报告以 `complete: false` 明确标记；
 - warning 不影响 `valid`；报告、issue、warning 和 details 都是冻结快照；
 - 路径不存在或无法读取时仍分别抛 `NOT_FOUND` / `IO_ERROR`。一旦输入 bytes 可读，其余格式、图和正文问题进入报告；普通 open/read 继续保持 fail-fast；
-- 诊断是纯只读操作，不获取 writer lock、不改变 generation/Head/工作副本，也不提供自动修复或忽略哈希选项。
+- 诊断是纯只读操作，不获取 writer lock、不改变 generation/Head/工作副本，也不提供自动修复或忽略哈希选项；
+- `full` 不包含外部 sidecar。Core 不扫描 Markdown AST 或资源引用；需要验证已知受管图片时，单独调用 `verifyManagedResource()`。
+
+## 受管图片
+
+四个方法只管理 Core 内容寻址 sidecar，不解析任意 Markdown 链接。普通相对/绝对路径和网络 URL 原样保存，宿主根据 `baseDirectory` 处理。完整的插图、渲染和分享流程见[图片与相对资源](./resources.md)。
+
+```ts
+type ManagedImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+type ManagedResourcePath =
+  `./.mdv-assets/${DocumentId}/${string}.${'png' | 'jpg' | 'gif' | 'webp'}`
+
+interface ImportResourceInput {
+  readonly bytes: Uint8Array
+  readonly mediaType?: string
+}
+
+interface ResourceOptions {
+  readonly maxBytes?: number
+}
+
+interface ManagedResourceContent {
+  readonly relativePath: ManagedResourcePath
+  readonly mediaType: ManagedImageMediaType
+  readonly bytes: Uint8Array
+}
+
+interface LocatedDocumentSnapshot extends DocumentSnapshot {
+  readonly baseDirectory: string
+  resolveManagedResource(relativePath: string): Promise<string>
+  readManagedResource(relativePath: string, options?: ResourceOptions): Promise<ManagedResourceContent>
+  verifyManagedResource(relativePath: string, options?: ResourceOptions): Promise<void>
+}
+
+interface MdvDocument extends LocatedDocumentSnapshot {
+  readonly packagePath: string
+  importManagedResource(input: ImportResourceInput, options?: ResourceOptions): Promise<ManagedResourcePath>
+  // 另有下文的 save/commit/checkout 方法。
+}
+```
+
+### `importManagedResource(input, options?)`
+
+- 从文件头识别 PNG/JPEG/GIF/WebP，规范扩展名分别为 png/jpg/gif/webp；`mediaType` 可省略，提供时必须与识别结果一致。输入 bytes、媒体声明和上限在首次异步工作前固定；
+- 原始 bytes 的 SHA-256 决定文件名，输出 `./.mdv-assets/<当前 documentId>/<64 位小写 hash>.<extension>`；不接受 filename/output directory 选项；
+- 先写私有临时文件、回读校验并 fsync，再通过 hard-link 不覆盖发布；相同 bytes 可并发幂等复用，已有坏文件不覆盖、不修复；
+- 不改变 `.mdv` bytes、generation、Head、历史或 Markdown。没有 `expectedGeneration`，也不获取 MDV writer lock；同一 documentId 的旧 generation handle 可以导入，随后 save 仍需要通过 CAS；
+- 操作前确认路径仍绑定原目标，当前 MDV 是普通文件且 documentId 相同。内存解析的 located snapshot 没有此方法；
+- 导入成功后再由宿主把相对路径插入 buffer/save；资源与 MDV 不是一个跨文件事务，save 失败不删除已导入图片。
+
+### `resolveManagedResource(relativePath)`
+
+只接受当前 documentId 下严格的 hash 路径（开头 `./` 可省略）。拒绝绝对路径、穿越、其他 documentId、查询/片段、symlink 与非普通文件。返回规范化的本地绝对路径，不返回 HTML、`file:` URL 或 VS Code URI，也不改写 Markdown。
+
+resolve 检查位置与存在性，**不读取并校验内容 hash**。它只保证解析时刻的路径检查结果；宿主拿到路径后，外部进程仍可能修改文件。若要消费经 hash 验证的实际内容，使用 read 返回的 bytes。
+
+### `readManagedResource(relativePath, options?)` / `verifyManagedResource(relativePath, options?)`
+
+read 在同一个已打开文件句柄上执行限量读取、SHA-256 与媒体/扩展名校验，并检测读取中的内容变化。返回冻结的 `{ relativePath, mediaType, bytes }`；bytes 是调用方独立副本。verify 执行相同验证但成功返回 `void`。它们检查调用时的外部文件，不把 sidecar 视作随 MDV snapshot 固定的磁盘快照。
+
+import/read/verify 默认 `maxBytes = 32 * 1024 * 1024`（32 MiB），每次可单独覆盖为正安全整数；与 ZIP 的 `options.limits` 无关。文件头识别不是完整图片解码或像素安全检查。
+
+### 资源失败与平台边界
+
+路径/导入类型错误使用 `INVALID_RESOURCE`，缺失使用 `NOT_FOUND`，超限使用 `LIMIT_EXCEEDED`，读取内容与 hash/扩展名不一致使用 `INTEGRITY_MISMATCH`。目录或读取中文件身份变化使用 `CONFLICT`。输入形状错误为 `TypeError`，非法 `maxBytes` 为 `RangeError`。
+
+发布后目录同步或清理失败时可能抛错但目标已经完整存在：`details.committed === true`，另有 `stage`、`relativePath`、`path`，清理异常附 `cleanupFailures`。宿主可以先 read/verify 确认，并用同样 bytes 重试导入，不应无条件删除 hash 文件。
+
+资源不会因 hard-link 数大于 1 而直接拒绝：原子发布需要短暂的第二个 link，读取必须以 bytes 校验为准。受管路径内部拒绝 symlink，基准本身的合法目录 alias 可规范化；目录身份检查不构成对同权限恶意进程持续替换目录的沙箱。POSIX 本地文件与目录执行 fsync；Windows 目录持久性与跨平台 CI 限制同[资源文档](./resources.md#发布失败与恢复边界)，不对网络/FUSE/同步盘作同等级保证。
 
 ## 保存工作副本
 
@@ -344,7 +423,7 @@ interface SaveInput {
   readonly expectedGeneration: number
 }
 
-interface MdvDocument extends DocumentSnapshot {
+interface MdvDocument extends LocatedDocumentSnapshot {
   saveReference(input: SaveInput): Promise<MdvDocument>
   saveDocument(input: SaveInput): Promise<MdvDocument>
 }
@@ -372,7 +451,7 @@ document = await document.saveDocument({
 
 Writer 在目标同目录创建 mode `0600` 的唯一临时 ZIP，逐条复制并校验历史内容，使用完整 Reader 验证新包，刷新临时文件后再发布。保存以同目录原子 replace 为 commit point；POSIX 本地文件系统随后同步父目录。commit point 前失败时旧包保持 byte-for-byte 不变；commit point 后若目录同步失败，错误 details 会包含 `committed: true` 和已发布的 generation，调用方必须重新 `openMdv` 确认状态。
 
-当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。所有路径绑定写操作都拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，但正式 CI 矩阵留到发布收口阶段。
+当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。MDV 整包写事务拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件；受管图片使用上节单独描述的不覆盖发布规则。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，但正式 CI 矩阵留到发布收口阶段。
 
 Windows 使用可写句柄刷新临时文件，并依赖 Node 的同目录 rename/link 提供可见性；Node 没有可移植的 Windows 目录 fsync/write-through 接口，因此断电后的目录项持久性尚未达到 POSIX 路径的同等级保证，也尚未经过 Windows CI 实测。Windows 目标名末尾的点或空格会被拒绝，以免路径规范化产生第二把锁。
 
@@ -415,11 +494,12 @@ try {
 | `INVALID_VERSION` | 版本 metadata 不合法 |
 | `INVALID_GRAPH` | parent、bind、Head、循环或跨树关系不合法 |
 | `INVALID_UTF8` | Markdown 不是无 BOM 的合法 UTF-8 |
-| `INTEGRITY_MISMATCH` | 历史正文长度或 SHA-256 与 metadata 不一致 |
-| `NOT_FOUND` | 文件路径或 Version ID 不存在 |
-| `LIMIT_EXCEEDED` | ZIP、JSON、版本数或自定义读取上限被超过 |
+| `INVALID_RESOURCE` | 非法受管路径、其他 documentId、symlink/非普通资源，或不支持/不匹配的导入媒体类型 |
+| `INTEGRITY_MISMATCH` | 历史正文长度/SHA-256 与 metadata 不一致，或受管资源 hash/媒体/扩展名不一致 |
+| `NOT_FOUND` | 文件路径、受管资源或 Version ID 不存在 |
+| `LIMIT_EXCEEDED` | ZIP、JSON、版本数、Diff 或受管资源读取上限被超过 |
 | `IO_ERROR` | 其他文件系统读写、刷新、替换或清理失败 |
-| `CONFLICT` | generation/document/path 身份冲突、目标已存在、已被其他 writer 锁定，或 checkout 遇到 dirty 工作副本 |
+| `CONFLICT` | generation/document/path 身份冲突、目标已存在、已被其他 writer 锁定、checkout 遇到 dirty 工作副本，或资源读取中检测到变化 |
 
 `details` 可能包含 entry、Version ID、I/O code、预期/实际 generation、`committed`、事务 stage 或清理状态，但不会包含完整 Markdown 正文。
 

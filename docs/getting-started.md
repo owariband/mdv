@@ -1,6 +1,6 @@
 # 快速开始
 
-本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的当前 API 创建、打开、保存、commit、checkout、比较和诊断一个 `.mdv` 文件。
+本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的当前 API 创建、打开、保存、commit、checkout、比较和诊断一个 `.mdv` 文件，以及导入图片。
 
 ## 环境要求
 
@@ -163,6 +163,28 @@ console.log(await snapshot.readDocumentText())
 - 未传 `baseDirectory` 时，`baseDirectory` 也为 `null`；
 - 如果 Markdown 包含相对图片或链接，由调用方提供可信的资源基准目录。
 
+显式传入 `baseDirectory` 时返回 `LocatedDocumentSnapshot`，可调用 `resolveManagedResource`、`readManagedResource` 和 `verifyManagedResource`；它仍不能 import/save/commit。无基准的普通 `DocumentSnapshot` 在类型和运行时都不提供资源方法。
+
+## 插入图片
+
+```ts
+import { readFile } from 'node:fs/promises'
+
+const imagePath = await mdv.importManagedResource({
+  bytes: await readFile('/downloads/cat.png'),
+})
+const markdown = await mdv.readDocumentText()
+mdv = await mdv.saveDocument({
+  markdown: `${markdown}\n![cat](${imagePath})\n`,
+  expectedGeneration: mdv.manifest.generation,
+})
+
+const localImagePath = await mdv.resolveManagedResource(imagePath)
+// 宿主将 localImagePath 转换成自己的渲染 URI。
+```
+
+PNG/JPEG/GIF/WebP 会按 hash 保存到 `.mdv-assets/<documentId>/`，默认上限 32 MiB；重复导入同一图片可复用。导入本身不修改 Markdown 或 generation，只有后面的 save 才保存路径，commit 才固化版本。普通自定义路径仍保持原样，相对路径统一基于 `.mdv` 所在目录。详见[图片与相对资源](./resources.md)。
+
 ## 查询历史和绑定
 
 ```ts
@@ -256,4 +278,4 @@ editor.setMarkdown(new TextDecoder().decode(source.bytes), {
 - 阅读[核心概念](./concepts.md)理解 Reference、Document 和 bind；
 - 阅读[API 参考](./api-reference.md)查看当前可用契约；
 - 阅读[图片与相对资源](./resources.md)处理图片路径；
-- 后续资源与发布计划见[开发路线图](./design/roadmap.md)；调用方始终通过 package-root API 操作，不直接修改 ZIP entry。
+- 后续 M6 发布硬化计划见[开发路线图](./design/roadmap.md)；调用方始终通过 package-root API 操作，不直接修改 ZIP entry。

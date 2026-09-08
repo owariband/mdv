@@ -9,6 +9,9 @@
 - Diff 采用无第三方依赖的 bounded Myers，支持任意两份工作副本/Version 的同树或跨树比较，保留 CRLF/LF/CR、Unicode 和 EOF newline，并对输入、行数、编辑距离、hunk 和输出实施硬上限。
 - `verifyMdv` 默认检查 metadata，full 模式通过单次 ZIP 扫描验证全部历史正文并聚合独立 UTF-8、长度与哈希问题；阻断结构、资源限制和 issue budget 截断通过 `complete: false` 表达。
 - M5 没有修改 Format 0.1、Writer、mutation、transaction 或 runtime dependencies；人类左右对照仍由 bind/trace/read + 上游 UI 组合。下一阶段进入 M5.5 受管图片 sidecar。
+- 完成 M5.5：四个 `ManagedResource` API、带基准的只读 snapshot、PNG/JPEG/GIF/WebP 内容寻址、不覆盖原子发布与限量 hash 校验；保留普通 Markdown 路径自由，不改 ZIP/版本/Markdown。
+- 新增 D011，关闭 O002，明确 resolve 返回本地绝对路径但不计算 hash；read/verify 消费已校验 bytes。资源和 `.mdv` 是独立事务，无 GC，`verifyMdv(full)` 不检查外部 sidecar。
+- 本轮全量 147 项测试与 typecheck 通过，覆盖真实跨进程导入、发布/清理故障、读取中变化、路径安全和历史图片回读；同步官方文档与设计状态，下一阶段为 M6 发布硬化，不启动上游客户端。
 
 ## 2026-09-07
 

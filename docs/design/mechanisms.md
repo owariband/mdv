@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含尚未落地的机制；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5 已完成；结构化 status、统一内容选择、bounded source Diff 与顶层完整性诊断均已从 package root 提供。下一阶段是 M5.5 受管图片 sidecar。
+> 实现进度：M5.5 已完成；结构化 status、统一内容选择、bounded source Diff、顶层完整性诊断与受管图片均已从 package root 提供。下一阶段是 M6 发布硬化。
 
 ## 1. 已确定的技术结论
 
@@ -106,22 +106,23 @@ VS Code / MarkText adapter / TypeScript 宿主 -+
                                            |
                                            v
                                   @mdv/core public facade
-                                           |
-                                           v
-                                  core（模型与用例规则）
-                                           |
-                                           v
-                                  archive（ZIP 与本地事务）
-                                           |
-                                           v
-                                        .mdv 文件
+                                    |               |
+                                    v               v
+                          core（版本用例）     resource/model（图片规则）
+                                    |               |
+                                    v               v
+                          archive（ZIP 事务）  resource/store（资源 I/O）
+                                    |               |
+                                    v               v
+                                .mdv 文件       .mdv-assets/ sidecar
 ```
 
 依赖只能向下：
 
-- public facade 由根目录下的 `index.ts`、`mdv-document.ts`、`types.ts` 和 `errors.ts` 组成，可以导入 `core/`，但不能暴露 `archive/` 类型；
+- public facade 由根目录下的 `index.ts`、`mdv-document.ts`、`types.ts` 和 `errors.ts` 组成，编排 `core/`、`archive/` 与 `resource/`，但不能暴露内部类型；
 - `core/` 可以调用具体的 `archive/` 模块；
 - `archive/` 不导入 public facade 或 `core/`，只处理格式 DTO、字节、路径和事务；
+- `resource/` 不导入 public facade、`core/` 或 `archive/`，只处理受管路径、图片 bytes 与 sidecar I/O；
 - `index.ts` 是唯一 public export 入口。
 - 上游 `mdv-cli` 只能依赖 `@mdv/core` 的公开 package export，不能导入 `core/` 或 `archive/` 内部路径。
 
@@ -165,6 +166,8 @@ Public facade 不判断 parent/bind 规则，也不直接操作 ZIP entry。第�
 - 写同目录临时 ZIP，校验、fsync 后原子替换原文件。
 
 Archive 保证物理包和本地写入事务的一致性；Core 保证版本语义的一致性。两层不能分别实现一套 Head、parent 或 bind 规则。这里的 archive 不是数据库或服务端“持久层”，只是 `.mdv` ZIP 和文件系统 I/O。
+
+M5.5 的 `resource/model.ts` / `resource/store.ts` 分别承载图片的确定性规则与本地持久化，保持三层职责，不另加业务 service/repository。sidecar 是 ZIP 外的独立文件，不能塞入 `archive/transaction.ts` 后宣称与 Markdown 一起原子提交。
 
 ### 3.4 独立 CLI 上游项目
 
@@ -226,24 +229,31 @@ mdv/
 │   │   ├── commands.ts
 │   │   ├── status.ts
 │   │   └── diff.ts
-│   └── archive/
-│       ├── format-dto.ts
-│       ├── codec.ts
-│       ├── reader.ts
-│       ├── writer.ts
-│       ├── limits.ts
-│       ├── lock.ts
-│       ├── mutation.ts
-│       ├── transaction.ts
-│       └── verify.ts
+│   ├── archive/
+│   │   ├── format-dto.ts
+│   │   ├── codec.ts
+│   │   ├── reader.ts
+│   │   ├── writer.ts
+│   │   ├── limits.ts
+│   │   ├── lock.ts
+│   │   ├── mutation.ts
+│   │   ├── transaction.ts
+│   │   └── verify.ts
+│   └── resource/
+│       ├── model.ts
+│       └── store.ts
 └── test/
     ├── status.test.mjs
     ├── diff.test.mjs
     ├── verify.test.mjs
-    └── m5-api.test.mjs
+    ├── m5-api.test.mjs
+    ├── resource-model.test.mjs
+    ├── resource-store.test.mjs
+    ├── resource-api.test.mjs
+    └── cross-process.test.mjs
 ```
 
-`status.ts`、`diff.ts`、`verify.ts` 和对应测试已在 M5 落地，其余条目表示当前已存在的主要模块。实现一个用例时才增加承载真实逻辑的文件，不预建空目录或空接口；同一文件明显变得难读时再拆分。
+上述主要模块已存在；M5.5 只新增承载真实图片规则/I/O 的两个 resource 文件，未预建空目录或 provider 接口。同一文件明显变得难读时再拆分。
 
 `package.json` 只有 Library export，不声明 `bin`：
 
@@ -442,6 +452,11 @@ read*Text() -> markdown-it adapter -> token / HTML
 ```ts
 export function parseMdv(
   bytes: Uint8Array,
+  options: LocatedParseOptions,
+): Promise<LocatedDocumentSnapshot>
+
+export function parseMdv(
+  bytes: Uint8Array,
   options?: ParseOptions,
 ): Promise<DocumentSnapshot>
 
@@ -460,7 +475,7 @@ interface CreateOptions extends OpenOptions {
 }
 ```
 
-- `parseMdv` 是只读内存入口；除非调用方在 options 中提供资源基准，否则 `baseDirectory = null`。
+- `parseMdv` 是只读内存入口；除非调用方在 options 中提供资源基准，否则 `baseDirectory = null` 且没有资源方法。显式基准返回 `LocatedDocumentSnapshot`，只提供受管 resolve/read/verify，不提供 import/save。
 - `openMdv` 保存规范化后的 `.mdv` 包路径和所在目录，但不会伪造内部 Markdown path。
 - `createMdv` 在目标不存在时创建 generation 0、两个空工作副本、零版本、零 Head 的包；目标已存在时返回 `CONFLICT`，不覆盖也不跟随 symlink。
 
@@ -662,7 +677,7 @@ M5 不再增加单独的 Markdown export API：只传 `'working'` 无法表达�
 ### 6.4 写操作
 
 ```ts
-interface MdvDocument extends DocumentSnapshot {
+interface MdvDocument extends LocatedDocumentSnapshot {
   saveReference(input: SaveInput): Promise<MdvDocument>
   saveDocument(input: SaveInput): Promise<MdvDocument>
   commitReference(input: CommitInput): Promise<CommitResult>
@@ -845,6 +860,20 @@ M5 也不修改 `package.json` 的 runtime dependencies：bounded Myers 保持�
 
 M5.5 的资源 sidecar 是独立文件事务，不复用 `.mdv` 整包 transaction，也不把资源 bytes 伪装成 Markdown Version。M6 若基准数据证明整包重写不满足目标，再为后续格式版本立项；不能在 M5/M5.5 中提前引入增量容器或 Repository 框架。
 
+### 7.9 M5.5 实际实现与资源事务
+
+公开能力使用 `ManagedResource` 前缀以区分任意普通 Markdown 链接：路径和 MIME 的限制只属于受管 API。`types.ts` 导出 `LocatedDocumentSnapshot`、`LocatedParseOptions`、`ImportResourceInput`、`ResourceOptions`、`ManagedResourcePath`、`ManagedImageMediaType` 与 `ManagedResourceContent`；内部模型不向外泄露，也不依赖宿主 parser 类型。
+
+- `resource/model.ts` 固定严格 grammar、当前 documentId 隔离、SHA-256、PNG/JPEG/GIF/WebP 文件头识别和 png/jpg/gif/webp 扩展名。默认单资源 32 MiB，与 Archive limits 独立；声明 MIME 不一致为 `INVALID_RESOURCE`，已存 bytes 与 hash/扩展名不一致为 `INTEGRITY_MISMATCH`。
+- `resource/store.ts` 规范化可信基准目录，拒绝 sidecar 内部 symlink/非普通条目，记录并复查目录 dev/ino。资源以 `O_NOFOLLOW`（平台支持时）打开，lstat/fstat 校验同一文件身份，在同一个 fd 上限量读取并验证 hash；读取中增长也有计数限制。
+- resolve 只验证路径、存在性和文件类型，返回规范本地绝对路径。read 返回经验证的 bytes 副本，verify 执行相同读取但成功无数据；路径返回值不是永久句柄，不能提供随后任意外部读取的完整性保证。
+- import 首次异步前复制 bytes 并固定 MIME/上限；通过现有路径身份规则确认 handle，重开当前 MDV 校验 documentId。generation 变旧不阻止导入，save 仍独立执行 CAS。
+- 新资源在目标目录以 wx/0600 创建私有临时文件，写入、回读校验、fsync 后，以 hard-link 不覆盖发布；遇到 EEXIST 必须回读目标并逐字节一致才复用。新建受管目录 mode 为 0700；正常路径清理临时文件并同步目录。
+- 不用普通 rename 覆盖 hash 文件，不根据 nlink 大于 1 拒绝资源：原子发布期间第二个 link 是正常状态。读取中文件 size/mtime 改变为 `CONFLICT`，link count/ctime 的合法变化不制造误报。
+- 错误 details 保留 stage/path/relativePath；发布后或已确认复用时失败带 `committed: true`，清理失败带 `cleanupFailures`。目录已被替换时宁可留下本次临时文件，也不跟随新目录执行危险清理。没有自动重试、锁回收或 GC。
+
+这些检查针对受支持本地文件系统的正常并发和可检测替换，不构成对同权限恶意进程持续置换目录的安全沙箱。Windows 目录同步不提供 POSIX 同等级保证，跨平台 CI 和故障恢复仍由 M6 验证。`Archive`、Format 0.1、版本图/commands 和 runtime dependencies 均未修改。
+
 ## 8. Archive 与本地文件事务
 
 ### 8.1 Reader
@@ -959,6 +988,7 @@ const referenceSource = trace.reference === null
 adapter 另外负责：
 
 - 把 `baseDirectory` 交给图片、链接和导出逻辑；
+- 对粘贴图片调用 `importManagedResource` 并插入返回的相对路径，受管预览用 resolve 的本地绝对路径转换渲染 URI，或直接消费 read 的已验证 bytes；普通自定义链接仍由宿主按基准处理；
 - 决定何时普通保存、何时显式 commit；
 - 在 UI 中展示两棵历史、unbound、drift 和冲突；
 - 把 Markdown 字符串传回 Core，而不是把宿主编辑器 State 写进 `.mdv`；
@@ -982,6 +1012,7 @@ Core 只保证它需要的底层能力完整且稳定：
 | 追踪来源和影响 | `traceDocument` / `traceReference` |
 | Review 变化 | `diff` |
 | 校验文件 | `verifyMdv` |
+| 导入与读取受管图片 | `importManagedResource` / `resolveManagedResource` / `readManagedResource` / `verifyManagedResource` |
 
 `mdv-cli` 可以把这些 API 组织成人类命令和 Agent tool，但必须遵守 Core 的 `expectedGeneration`、nullable reference bind、稳定错误码和只读历史约束。CLI 不能通过解包后直接改 entry 来绕过 Core。
 
@@ -1001,6 +1032,8 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 | ZIP/metadata/content 诊断扫描 | `archive/verify.ts` |
 | verify 的版本图诊断 | `core/invariants.ts`，由 public facade 汇总 |
 | generation CAS、锁、临时文件、原子替换 | `archive/transaction.ts` |
+| 受管路径 grammar、媒体头、hash 和单资源上限 | `resource/model.ts` |
+| sidecar 路径安全、限量读取与不覆盖原子发布 | `resource/store.ts` |
 | public 参数、结果与稳定错误码 | `mdv-document.ts`、`types.ts`、`errors.ts` |
 | Markdown AST 与渲染 | 外部 adapter / renderer |
 
@@ -1054,7 +1087,7 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 6. 实现 M3 transaction、create/save 和冲突测试。
 7. 已实现 M4 commit/checkout，并复用 M3 事务路径。
 8. 已实现 M5 `readContent`、异步 status、bounded source Diff 和顶层 `verifyMdv`，完成 Agent-friendly 检查与诊断能力。
-9. 实现 M5.5 内容寻址 sidecar 的 import/resolve/read/hash verify，完成图片资源闭环。
+9. 已实现 M5.5 内容寻址 sidecar 的 import/resolve/read/hash verify，完成图片资源闭环。
 10. 实现 M6 fixtures/fuzz/benchmark/CI/package/API 兼容承诺，完成 Core 0.1 发布收口。
 11. Core 0.1 验收后再启动独立 VS Code extension；MarkText adapter 与 CLI 继续作为上游独立项目。
 

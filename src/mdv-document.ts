@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { lstat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 
@@ -57,6 +58,8 @@ import {
 } from './core/queries.js'
 import { computeDocumentStatus } from './core/status.js'
 import { MdvError } from './errors.js'
+import { parseResourcePath, prepareResource, ResourceError, resolveResourceLimit } from './resource/model.js'
+import { importResource, readResource, resolveResource } from './resource/store.js'
 import type {
   Actor,
   CheckoutInput,
@@ -74,6 +77,11 @@ import type {
   DocumentStatus,
   DocumentTrace,
   DocumentVersionSummary,
+  ImportResourceInput,
+  LocatedDocumentSnapshot,
+  LocatedParseOptions,
+  ManagedResourceContent,
+  ManagedResourcePath,
   MarkdownSource,
   MdvDocument,
   MdvWarning,
@@ -81,6 +89,7 @@ import type {
   ParseOptions,
   ReferenceTrace,
   ReferenceVersionSummary,
+  ResourceOptions,
   SaveInput,
   TreeKind,
   VersionId,
@@ -97,6 +106,8 @@ const MARKDOWN_PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const VERSION_ID = /^v_[0-9a-f]{32}$/
 const DEFAULT_MAX_VERIFY_ISSUES = 100
 
+export function parseMdv(bytes: Uint8Array, options: LocatedParseOptions): Promise<LocatedDocumentSnapshot>
+export function parseMdv(bytes: Uint8Array, options?: ParseOptions): Promise<DocumentSnapshot>
 export async function parseMdv(
   bytes: Uint8Array,
   options: ParseOptions = {},
@@ -249,6 +260,11 @@ function createReadonlySnapshot(
   archive: OpenedArchive,
   baseDirectory: string | null,
 ): DocumentSnapshot {
+  if (baseDirectory !== null) {
+    return Object.freeze(new LocatedReadonlySnapshot(
+      archive, hydrateOpenedArchive(archive), null, baseDirectory,
+    ))
+  }
   return Object.freeze(new ReadonlyDocumentSnapshot(
     archive,
     hydrateOpenedArchive(archive),
@@ -276,7 +292,7 @@ function createFileDocument(
 class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentSnapshot {
   readonly manifest
   readonly packagePath: TPath
-  readonly baseDirectory: TPath
+  readonly baseDirectory: string | null
   readonly referenceTree
   readonly documentTree
   readonly warnings
@@ -293,7 +309,7 @@ class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentS
     archive: OpenedArchive,
     state: MdvState,
     packagePath: TPath,
-    baseDirectory: TPath,
+    baseDirectory: string | null,
   ) {
     this.#archive = archive
     this.#state = state
@@ -594,7 +610,57 @@ class ReadonlyDocumentSnapshot<TPath extends string | null> implements DocumentS
   }
 }
 
-class FileMdvDocument extends ReadonlyDocumentSnapshot<string> implements MdvDocument {
+class LocatedReadonlySnapshot<TPath extends string | null>
+  extends ReadonlyDocumentSnapshot<TPath> implements LocatedDocumentSnapshot {
+  declare readonly baseDirectory: string
+
+  constructor(archive: OpenedArchive, state: MdvState, packagePath: TPath, baseDirectory: string) {
+    super(archive, state, packagePath, baseDirectory)
+  }
+
+  async resolveManagedResource(relativePath: string): Promise<string> {
+    try {
+      const resource = parseResourcePath(this.manifest.documentId, relativePath)
+      return await resolveResource(await this.resourceDirectory(), resource)
+    } catch (cause) {
+      throw toResourceMdvError(cause)
+    }
+  }
+
+  async readManagedResource(
+    relativePath: string,
+    options: ResourceOptions = {},
+  ): Promise<ManagedResourceContent> {
+    const maxBytes = resolveResourceLimit(options)
+    try {
+      const resource = parseResourcePath(this.manifest.documentId, relativePath)
+      const bytes = await readResource(await this.resourceDirectory(), resource, maxBytes)
+      return Object.freeze({
+        relativePath: resource.relativePath as ManagedResourcePath,
+        mediaType: resource.mediaType,
+        bytes: Uint8Array.from(bytes),
+      })
+    } catch (cause) {
+      throw toResourceMdvError(cause)
+    }
+  }
+
+  async verifyManagedResource(relativePath: string, options: ResourceOptions = {}): Promise<void> {
+    const maxBytes = resolveResourceLimit(options)
+    try {
+      const resource = parseResourcePath(this.manifest.documentId, relativePath)
+      await readResource(await this.resourceDirectory(), resource, maxBytes)
+    } catch (cause) {
+      throw toResourceMdvError(cause)
+    }
+  }
+
+  protected async resourceDirectory(): Promise<string> {
+    return this.baseDirectory
+  }
+}
+
+class FileMdvDocument extends LocatedReadonlySnapshot<string> implements MdvDocument {
   readonly #openOptions: OpenOptions
   readonly #targetPath: string
 
@@ -610,6 +676,41 @@ class FileMdvDocument extends ReadonlyDocumentSnapshot<string> implements MdvDoc
     this.#openOptions = openOptions
     this.#targetPath = targetPath
     Object.freeze(this)
+  }
+
+  async importManagedResource(
+    input: ImportResourceInput,
+    options: ResourceOptions = {},
+  ): Promise<ManagedResourcePath> {
+    const maxBytes = resolveResourceLimit(options)
+    try {
+      const prepared = prepareResource(this.manifest.documentId, input, maxBytes)
+      const baseDirectory = await this.resourceDirectory()
+      const current = await openArchiveFromPath(this.#targetPath, this.#openOptions)
+      try {
+        if (!(await lstat(this.#targetPath)).isFile()) {
+          throw new MdvError('INVALID_RESOURCE', 'Resource import requires a regular MDV file', {
+            details: { reason: 'non-regular-document', path: this.#targetPath },
+          })
+        }
+        if (current.manifest.documentId !== this.manifest.documentId) {
+          throw new MdvError('CONFLICT', 'MDV path now contains another document', {
+            details: { reason: 'document-changed', path: this.#targetPath },
+          })
+        }
+      } finally {
+        await current.close()
+      }
+      await importResource(baseDirectory, prepared)
+      return prepared.location.relativePath as ManagedResourcePath
+    } catch (cause) {
+      throw toResourceMdvError(cause)
+    }
+  }
+
+  protected override async resourceDirectory(): Promise<string> {
+    await requireBoundTarget(this.packagePath, this.#targetPath)
+    return dirname(this.#targetPath)
   }
 
   async saveReference(input: SaveInput): Promise<MdvDocument> {
@@ -1538,7 +1639,7 @@ function toMdvError(cause: unknown, fallbackMessage: string): MdvError {
   if (cause instanceof MdvError) {
     return cause
   }
-  if (cause instanceof ArchiveError) {
+  if (cause instanceof ArchiveError || cause instanceof ResourceError) {
     return new MdvError(cause.code, cause.message, {
       details: cause.details,
       cause,
@@ -1554,4 +1655,11 @@ function toMdvError(cause: unknown, fallbackMessage: string): MdvError {
     return new MdvError('LIMIT_EXCEEDED', cause.message, { cause })
   }
   return new MdvError('IO_ERROR', fallbackMessage, { cause })
+}
+
+function toResourceMdvError(cause: unknown): Error {
+  if (cause instanceof TypeError || cause instanceof RangeError) {
+    return cause
+  }
+  return toMdvError(cause, 'Managed resource operation failed')
 }
