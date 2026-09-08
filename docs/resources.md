@@ -139,7 +139,7 @@ Core 使用同目录私有临时文件（`0600`），写入后回读校验并 fs
 
 错误分类：非法受管路径、symlink 或不支持/不匹配的导入类型为 `INVALID_RESOURCE`；缺失为 `NOT_FOUND`；超限为 `LIMIT_EXCEEDED`；已有文件 hash/内容类型不一致为 `INTEGRITY_MISMATCH`；检测到目录身份或读取中文件变化为 `CONFLICT`；其余文件系统失败为 `IO_ERROR`。错误类型参数使用 `TypeError`，非法 `maxBytes` 使用 `RangeError`。
 
-保证范围是具有可靠 link/fsync 语义的本地文件系统。目录身份检查和不跟随最终 symlink 是尽力防护，不是抵抗同权限恶意进程持续替换祖先目录的沙箱。不能只根据 hard-link 数大于 1 拒绝资源，因为原子发布本身会短暂产生第二个 link；读取始终校验 bytes。Windows 目录同步未提供与 POSIX 相同的保证，M6 已配置跨平台 CI，但尚待远端结果；网络/FUSE/同步盘不作同级承诺。最新状态见[兼容性与平台边界](./compatibility.md)，规范约定见 [Format 0.1：Relative resources](../spec/format-0.1.md#12-relative-resources)。
+保证范围是具有可靠 link/fsync 语义的本地文件系统。目录身份检查和不跟随最终 symlink 是尽力防护，不是抵抗同权限恶意进程持续替换祖先目录的沙箱。不能只根据 hard-link 数大于 1 拒绝资源，因为原子发布本身会短暂产生第二个 link；读取始终校验 bytes。M6 的跨平台 CI 已通过，但 Windows 目录同步仍未提供与 POSIX 相同的断电持久性保证；网络/FUSE/同步盘不作同级承诺。实际矩阵与限制见[兼容性与平台边界](./compatibility.md)，规范约定见 [Format 0.1：Relative resources](../spec/format-0.1.md#12-relative-resources)。
 
 ## 可移植性与历史限制
 

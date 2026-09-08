@@ -451,9 +451,9 @@ document = await document.saveDocument({
 
 Writer 在目标同目录创建 mode `0600` 的唯一临时 ZIP，逐条复制并校验历史内容，使用完整 Reader 验证新包，刷新临时文件后再发布。保存以同目录原子 replace 为 commit point；POSIX 本地文件系统随后同步父目录。commit point 前失败时旧包保持 byte-for-byte 不变；commit point 后若目录同步失败，错误 details 会包含 `committed: true` 和已发布的 generation，调用方必须重新 `openMdv` 确认状态。
 
-当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。MDV 整包写事务拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件；受管图片使用上节单独描述的不覆盖发布规则。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。本轮在 macOS 上实测；Linux 使用同一 POSIX 事务路径，M6 已配置三系统 CI，但远端运行结果待验证。
+当前写入保证限定在提供可靠目录创建、同目录 rename/link 与 fsync 语义的本地文件系统。MDV 整包写事务拒绝最终 symlink、hard link 数大于 1 的目标和其他非普通文件；受管图片使用上节单独描述的不覆盖发布规则。网络文件系统、FUSE、同步盘以及 ACL/xattr/owner/group 等额外文件元数据不在保持承诺内；POSIX mode 会在重写时保留，新建文件当前为 `0600`。M6 已通过三系统 CI 的 10 组检查，实际矩阵与平台限定见[兼容性文档](./compatibility.md)。
 
-Windows 使用可写句柄刷新临时文件，并依赖 Node 的同目录 rename/link 提供可见性；Node 没有可移植的 Windows 目录 fsync/write-through 接口，因此断电后的目录项持久性尚未达到 POSIX 路径的同等级保证，也尚未经过 Windows CI 实测。Windows 目标名末尾的点或空格会被拒绝，以免路径规范化产生第二把锁。
+Windows 使用可写句柄刷新临时文件，并依赖 Node 的同目录 rename/link 提供可见性；Node 没有可移植的 Windows 目录 fsync/write-through 接口，因此断电后的目录项持久性尚未达到 POSIX 路径的同等级保证，CI 通过不改变这一限制。Windows 目标名末尾的点或空格会被拒绝，以免路径规范化产生第二把锁。
 
 互斥锁是规范目标旁的 `<target>.lock` 目录。正常成功和失败路径都会释放；M3 不按时间自动回收已有锁，因为错误回收一个仍活跃 writer 的 lease 会破坏互斥。进程被 `SIGKILL`、机器崩溃或清理失败后可能留下该目录；只有在确认没有 writer 仍在运行时才能人工删除。若任何清理步骤失败，错误 details 会包含 `cleanupIncomplete: true` 和 `cleanupFailures`，而不是静默声称已经清理。
 

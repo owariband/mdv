@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-08
 >
-> 当前里程碑：M6 工程硬化已实现并本地验证；远端 CI 矩阵与发布身份/License 待验收
+> 当前里程碑：M6 工程硬化已实现，本地与远端 10 组 CI 均通过；发布身份/License 与正式发布待验收
 >
 > 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件
 >
@@ -44,7 +44,7 @@
 | M4 Commit 与 Checkout | 完成 | Core commands、有限 mutation、四个 package-root API、分叉与并发测试 | 后续 Agent-friendly status、Diff 与诊断 verify 留在 M5 |
 | M5 Agent-friendly 审阅与诊断 | 完成 | 结构化 status、统一 `ContentSpec`、bounded line Diff、metadata/full `verifyMdv` 与 package-root 测试 | 默认限制与诊断边界已记录；后续稳定兼容承诺留到 M6 |
 | M5.5 受管资源 sidecar | 完成 | 四个 `ManagedResource` API、located 只读快照、hash 校验、不覆盖原子发布与资源闭环测试 | POSIX/Windows 支持矩阵与长期兼容承诺留到 M6 |
-| M6 稳定发布 | 进行中 | 可重复 fixtures、有界 fuzz、复杂 Markdown 回归、干净源码 tarball/TS consumer、基准与 CI/release gate | 远端矩阵结果、npm scope/License/版本选择和实际发布待完成 |
+| M6 稳定发布 | 进行中 | 可重复 fixtures、有界 fuzz、复杂 Markdown 回归、干净源码 tarball/TS consumer、基准、10 组 CI 通过与 release gate | npm scope/License/版本选择和实际发布待完成 |
 | U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端；bind + 内容读取与图片 sidecar 已可用，具体 mode 属于 extension | 等待 M6 形成 Core 0.1 稳定发布闭环 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
 | U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游，M4/M5/M5.5 public API 已可用 | 等待 M6 错误码、诊断码兼容承诺稳定 |
@@ -241,7 +241,7 @@ Public API：
 - 原子 replace 前重新用完整 Reader 校验临时包；源历史和临时历史都逐条验证 UTF-8、长度与 SHA-256；
 - 事务成功直接返回锁内读取的新 `MdvDocument`，避免解锁后二次 open 读到另一个 writer 的 generation；
 - 锁采用规范目标旁的目录互斥。已有锁不按时间自动回收；异常退出后只有在确认无 writer 存活时才人工删除。清理失败通过 `cleanupIncomplete` 与 `cleanupFailures` 显式上报；
-- POSIX 本地文件系统路径会刷新临时文件、发布目录项以及锁删除后的目录元数据。Windows 会刷新临时文件，但 Node 缺少可移植目录 fsync/write-through，当前只承诺较弱的原子可见性，尚未完成 Windows CI 验证；
+- POSIX 本地文件系统路径会刷新临时文件、发布目录项以及锁删除后的目录元数据。Windows 会刷新临时文件，但 Node 缺少可移植目录 fsync/write-through，当前只承诺较弱的原子可见性；M3 当时未完成 Windows CI，M6 后续矩阵已通过，但不提高断电持久性承诺；
 - 提前加入 `prepare` 构建生命周期和独立 tarball consumer smoke，避免干净 checkout 打出的包缺少 `dist/`。
 
 M3 完成时的测试在 Node 20.19.5 与当前开发环境 Node 26.3.0 全部通过。覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、真实跨进程 create/save 竞争、generation/document/path 身份冲突、symlink/hardlink 防护、故障注入、commit point 之后的错误语义、清理失败报告、只读权限保持、临时文件及极端 umask 权限、历史完整性、未知 JSON 原样保留、动态时区下确定性以及 package-root 写 API。仓库当前测试总数以后续 `npm test` 输出为准，不在路线图中固化滚动数字。
@@ -506,20 +506,22 @@ M5 完成只表示 Agent/自动化所需的通用审阅与诊断原语已经齐�
 
 ### M6：一致性、性能与发布收口
 
-状态：**进行中：工程检查已实现，本地验收通过；远端平台与正式发布待收口**
+状态：**进行中：工程检查已实现，本地与远端矩阵验收通过；发布身份与正式发布待收口**
 
 目标：把已经完成版本语义、Agent-friendly 检查与受管资源闭环的参考实现，收口为其他项目可以稳定安装、持续验证和安全升级的 Core 0.1 包。M6 原则上不再增加新的主要业务语义。
 
 本轮实际交付（2026-09-08）：
 
-1. **M6.1 安装与 CI**：`test:package` 从不含 dist 的源码副本运行 prepare/build，真实打包、独立安装仅运行依赖，然后执行 runtime 闭环及 TypeScript 5.9.3 / 仓库 7.x consumer。唯一 ESM root 和负向类型边界均检查；三系统 × Node 22/24/26，加 Linux Node 20 的 CI 已配置，尚未远端运行。
+1. **M6.1 安装与 CI**：`test:package` 从不含 dist 的源码副本运行 prepare/build，真实打包、独立安装仅运行依赖，然后执行 runtime 闭环及 TypeScript 5.9.3 / 仓库 7.x consumer。唯一 ESM root 和负向类型边界均检查；三系统 × Node 22/24/26，加 Linux Node 20 的远端 CI 共 10 组已通过。
 2. **M6.2 一致性与安全**：fixtures 从 10 增至 15，生成器去除系统 zip 依赖并提供只读字节一致性检查；加入全部 fixture 的路径/bytes conformance、恶意 ZIP/严格 JSON/预算、LF/CRLF/CR 复杂 Markdown 端到端、有界 seeded fuzz。跨平台测试区分 POSIX mode、Windows junction 与有权限要求的文件 symlink，继续使用现有跨进程与故障注入测试。
 3. **M6.3 性能**：10/100/1000 版本 × 2/64 KiB 场景，独立进程测 open、最旧历史正文、trace、full verify、save、commit 和峰值 RSS；三轮样本与本机基线已入库。最大场景约 63.3 MiB，save/commit 中位数约 0.65 秒；不把默认上限当作性能保证，也不提前改增量容器。
 4. **M6.4 兼容与发布**：公开能力/错误码/默认预算由测试与文档共同约束；新增开发态检查、严格 release gate 和 prepublishOnly。开发版本、UNLICENSED、缺失 LICENSE 会明确阻止发布检查通过，最终授权和 scope 权限仍归 owner。
 
-本地证据：macOS / Node 26.3.0 下 `npm run check` 共 183 项，182 通过，1 项 Windows 专用路径测试按平台跳过；`test:package` 运行与双编译器检查通过；额外 seed=1 的 10,000 输入 fuzz 通过；两种时区的 fixture 字节一致性通过；完整六场景 benchmark 通过。严格 release gate 按预期非零退出，临时合成数据覆盖 gate 放行/拒绝与 lock/registry 检查。未修改 `src/`、Format 0.1、Schema 或 runtime dependencies；没有新增 CLI/renderer/storage 层。
+本地证据：macOS / Node 26.3.0 下 `npm run check` 共 183 项，182 通过，1 项 Windows 专用路径测试按平台跳过；`test:package` 运行与双编译器检查通过；额外 seed=1 的 10,000 输入 fuzz 通过；两种时区的 fixture 字节一致性通过；完整六场景 benchmark 通过。严格 release gate 按预期非零退出，临时合成数据覆盖 gate 放行/拒绝与 lock/registry 检查。初始工程提交 `a05b4d0` 未修改生产代码；后续 `52f1d33` 只在 Reader 的同一 descriptor 上补普通文件检查，并修正两项测试的平台假设。公开 API、Format 0.1、Schema、runtime dependencies 与生产分层均未改变。
 
-调用方入口：[兼容性](../compatibility.md)、[性能](../performance.md)、[验证/发布检查](../releasing.md)。这些技术结果不等于正式发布完成；没有 Windows/Linux 实跑或真实断电证据时，不扩大平台持久性承诺。
+远端证据：2026-09-08，[`52f1d33` 的矩阵](https://github.com/owariband/mdv/actions/runs/34193879318) 10/10 成功，所有 job 的安装、完整检查与 tarball consumer 均通过，Linux Node 24 benchmark smoke 通过。Windows 三组各 179 通过、0 失败、4 项既有平台限定 skip；首次失败与具体修复见[开发日志](./dev_log.md)。
+
+调用方入口：[兼容性](../compatibility.md)、[性能](../performance.md)、[验证/发布检查](../releasing.md)。这些技术结果不等于正式发布完成；跨平台测试不是真实断电实验，不扩大平台持久性承诺。
 
 实现范围：
 
@@ -586,12 +588,11 @@ CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
 
 ## 6. 下一批开发任务
 
-M6 的本地工程交付已完成，仍不同时启动 VS Code、MarkText 或 CLI。剩余验收按顺序执行：
+M6 的工程交付与跨平台 CI 验收已完成；首次 Windows 失败已修复并在 `52f1d33` 的 10 组矩阵中通过，证据及 skip 原因已记录。仍不同时启动 VS Code、MarkText 或 CLI，剩余验收按顺序执行：
 
-1. 经用户要求提交/推送后，观察该提交的全部 CI job，修复真实的平台失败，记录所有 skip 原因；仅有 workflow 文件不算跨平台通过。
-2. 结合目标宿主确认可接受的保存频率与历史规模；已有本机基线，不宣称验证了 10,000 Version / 512 MiB 上限或断电持久性。
-3. owner 确认 npm scope、发布权限、License 和版本策略；补 LICENSE 和 package/lock 身份，然后运行严格 release gate、最终 tarball 检查与正式发布流程。
-4. 记录真实提交和发布版本，再将 M6 标记完成、进入独立 VS Code 客户端阶段。
+1. 结合目标宿主确认可接受的保存频率与历史规模；已有本机基线，不宣称验证了 10,000 Version / 512 MiB 上限或断电持久性。
+2. owner 确认 npm scope、发布权限、License 和版本策略；补 LICENSE 和 package/lock 身份，然后运行严格 release gate、最终 tarball 检查并确认待发布提交的 CI，再执行正式发布流程。
+3. 记录真实提交和发布版本，再将 M6 标记完成、进入独立 VS Code 客户端阶段。
 
 资源 sidecar 与 `.mdv` 整包替换继续保持独立事务；M6 不改变“先导入可复用 hash 资源，再 save Markdown 引用”的顺序，也不新增增量容器或存储框架。
 

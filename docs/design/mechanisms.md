@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含尚未落地的机制；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5.5 产品能力与 M6 本地工程硬化已落地；M6 远端平台验证、发布身份与正式发布仍待验收。公开 API、Format 0.1 与生产分层未因 M6 改变。
+> 实现进度：M5.5 产品能力与 M6 工程硬化已落地；三系统 CI 的 10 组检查已通过，证据见[兼容性文档](../compatibility.md)，发布身份与正式发布仍待验收。公开 API、Format 0.1 与生产分层未因 M6 改变。
 
 ## 1. 已确定的技术结论
 
@@ -271,7 +271,7 @@ mdv/
     └── cross-process.test.mjs
 ```
 
-上述主要模块已存在；M5.5 只新增承载真实图片规则/I/O 的两个 resource 文件。M6 只补工程脚本、测试与文档，不改生产分层：scripts 是维护者检查入口，不是供 agent 装配的 CLI，也不进入 package exports。同一文件明显变得难读时再拆分。
+上述主要模块已存在；M5.5 只新增承载真实图片规则/I/O 的两个 resource 文件。M6 主要补工程脚本、测试与文档，首次 Windows CI 后另在 Reader 的同一 descriptor 上补普通文件检查；不改生产分层。scripts 是维护者检查入口，不是供 agent 装配的 CLI，也不进入 package exports。同一文件明显变得难读时再拆分。
 
 `package.json` 只有 Library export，不声明 `bin`：
 
@@ -941,7 +941,7 @@ commit point 之前的错误必须保持旧目标 byte-for-byte 不变，并尽�
 
 已有锁永不按时间自动回收，以免把缓慢但仍活跃的 writer 误判为 stale。进程崩溃后，维护者必须先确认没有活跃 writer，再人工删除 `<target>.lock` 和遗留的 `.mdv-*.tmp`。这是保守恢复契约，不是自动 crash recovery。
 
-save 保留原目标的 POSIX mode，但原子替换会更换 inode，因此 owner/group、ACL、xattr、Finder tags 和 Windows DACL/attributes 不属于保持契约。POSIX 路径会 fsync 父目录；Windows 只保证临时文件刷新与依赖系统 rename/link 的原子可见性，断电目录项持久性尚未达到同等级，也尚未经过 Windows CI 实测。
+save 保留原目标的 POSIX mode，但原子替换会更换 inode，因此 owner/group、ACL、xattr、Finder tags 和 Windows DACL/attributes 不属于保持契约。POSIX 路径会 fsync 父目录；Windows 只保证临时文件刷新与依赖系统 rename/link 的原子可见性，断电目录项持久性尚未达到同等级；M6 已通过 Windows 三组 CI，但未做真实断电实验，不改变这一限制。
 
 ### 8.3 Mutation plan
 

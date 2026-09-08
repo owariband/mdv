@@ -6,7 +6,7 @@
 
 MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@mdv/core` 是它的 TypeScript 参考实现。
 
-> 当前状态：开发预览。M5.5 产品能力已完成，包含双树读写、显式版本/bind、trace、Diff/诊断与受管图片。M6 已补充安装验证、安全回归、性能基线和 CI 配置；远端矩阵结果、发布身份/License 与正式 npm 发布仍待收口。
+> 当前状态：开发预览。M5.5 产品能力已完成，包含双树读写、显式版本/bind、trace、Diff/诊断与受管图片。M6 已补充安装验证、安全回归和性能基线，三系统 CI 的 10 组检查已通过；发布身份/License 与正式 npm 发布仍待收口。平台证据与限制见[兼容性文档](docs/compatibility.md)。
 
 ## 为什么使用 MDV
 

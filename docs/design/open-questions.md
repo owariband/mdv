@@ -12,7 +12,7 @@
 - 文件边界：写事务拒绝最终 symlink、hard-link alias 和其他非普通文件；一致性保证限于实现支持、能提供可靠目录锁、同目录原子替换与 fsync 语义的本地文件系统。网络文件系统、FUSE 和同步盘不作同等级承诺。
 - 恢复边界：锁永不按时间自动回收。异常退出后，只有在确认没有活跃 writer 时才人工删除 `<target>.lock` 与遗留的 `.mdv-*.tmp`；清理失败由结构化错误显式上报。
 - 元数据边界：save 保留 POSIX mode，不承诺 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。
-- 平台结论：macOS 本地文件系统已实测文件与目录同步；Windows 会刷新临时文件，但目录项 crash durability 弱于 POSIX，且尚未通过 Windows CI。因此 M3 不宣称两者具有同等级的断电持久性。
+- 平台结论：M3 当时已实测 macOS 文件与目录同步，尚未运行 Windows CI。M6 后续已通过三系统矩阵，见[兼容性文档](../compatibility.md)；Windows 仍只刷新临时文件，目录项 crash durability 弱于 POSIX，不宣称两者具有同等级的断电持久性。
 - 验证：测试在 Node 20.19.5 实跑通过，覆盖 ZIP64、multi-disk EOCD 与跨盘 entry 拒绝、写 ZIP、临时包全验、fsync、replace、目录同步故障注入、真实跨进程竞争、路径身份、清理失败与权限边界；独立 tarball consumer smoke 验证 package-root 安装和 create/save/open。滚动测试总数以 `npm test` 输出为准。
 
 ## O002：受管资源的媒体类型与扩展名策略
@@ -33,8 +33,8 @@
 - Owner：Repository owner
 - 问题：最终 npm scope、0.1 版本策略、发布权限和开源许可证。
 - 当前阻塞：`package.json` 仍为 `0.0.0-development` 与 `UNLICENSED`，没有 owner 审阅后的 LICENSE。M6 已实现开发态/严格 release gate，严格模式按预期拒绝通过。
-- 已有证据：干净源码 tarball runtime 与双 TypeScript consumer 已通过，CI 三平台矩阵已配置但尚待远端结果；见[发布检查](../releasing.md)。
-- 下一检查：推送并确认 CI 后、首次正式发布前由 owner 决定；技术检查不替代 scope 权限或 License 审阅。
+- 已有证据：干净源码 tarball runtime 与双 TypeScript consumer 已通过，修复提交 `52f1d33` 的三系统矩阵 10/10 成功；见[兼容性证据](../compatibility.md)与[发布检查](../releasing.md)。
+- 下一检查：CI 验收已完成，首次正式发布前由 owner 决定；技术检查不替代 scope 权限或 License 审阅。
 
 ## O004：资源随单文件携带
 

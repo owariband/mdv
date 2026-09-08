@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5.5 产品能力与 M6 本地工程硬化已落地；公开 API 和 Format 0.1 未改变，CI 矩阵已配置。远端平台证据、发布身份/License 和正式发布仍待 M6 验收。
+> 实现进度：M5.5 产品能力与 M6 工程硬化已落地；公开 API 和 Format 0.1 未改变，三系统 CI 的 10 组检查已通过，证据见[兼容性文档](../compatibility.md)。发布身份/License 和正式发布仍待 M6 验收。
 
 ## 1. 背景与目标
 
@@ -760,7 +760,7 @@ M3 为 `createMdv`、`saveReference` 和 `saveDocument` 落地了这套事务；
 
 锁是规范目标路径旁的 `<target>.lock` 目录。M3 有意不按年龄自动回收已有锁：进程遭遇 `SIGKILL`、机器崩溃或清理失败后，只有确认没有活跃 writer 时才可人工删除锁目录和同目录遗留的 `.mdv-*.tmp`。常规失败会尽力清理；如果清理本身失败，错误 details 明确携带 `cleanupIncomplete` 与 `cleanupFailures`。
 
-临时包从创建起限制为 POSIX mode `0600`；save 只保留原目标的 POSIX mode，不承诺保留 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。macOS/Linux 路径会同步临时文件和父目录；Windows 会刷新临时文件，但由于 Node 没有可移植的目录 fsync/write-through 接口，断电后的目录项持久性弱于 POSIX，且当前尚未经过 Windows CI 实测。
+临时包从创建起限制为 POSIX mode `0600`；save 只保留原目标的 POSIX mode，不承诺保留 owner/group、ACL、xattr、Finder tags 或 Windows DACL/attributes。macOS/Linux 路径会同步临时文件和父目录；Windows 会刷新临时文件，但由于 Node 没有可移植的目录 fsync/write-through 接口，断电后的目录项持久性弱于 POSIX。M6 的 Windows 三组 CI 已通过，但不等于真实断电实验，不能据此提高持久性承诺。
 
 0.1 接受整包重写成本。M3 Writer 使用 STORE 与固定 ZIP metadata 生成确定性 ZIP32；manifest 只原位替换 generation token，历史 version metadata 原始字节透传，历史正文以单次 ZIP 扫描逐版本校验并送入 Writer，避免把全部历史正文同时驻留内存。Writer 不能就地改写旧包。大文档的内容去重、分块和增量容器属于后续格式版本。
 

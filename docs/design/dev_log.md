@@ -11,13 +11,18 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
-## M6 首次 Windows CI 修复 — 2026-09-08
+## `52f1d33` — `fix: align archive inputs and snapshot tests on Windows`
 
+- 完整 SHA：`52f1d3383b0797a6348df5007f2696a7aa0b9ced`
+- 日期：2026-09-08
+- 状态：已推送至 `origin/main`；[修复后的 CI](https://github.com/owariband/mdv/actions/runs/34193879318) 已完成，10/10 成功。
 - 原始证据：[首次 CI](https://github.com/owariband/mdv/actions/runs/34193052019) 的 Linux/macOS 共 7 组通过，Windows Node 22/24/26 共 3 组失败；各 Windows 组均为同样 3 项失败、176 通过、4 项既有 POSIX 专用测试跳过，tarball 步骤未执行。
 - Reader 在已打开的 descriptor 上复用 fstat，同时检查普通文件类型。目录输入不再依赖平台目录 size/读取行为，而是从 open / metadata verify / full verify 稳定抛 `IO_ERROR`；不新增路径预检查或第二个文件句柄。
 - 两个同句柄读取测试不再假设目标打开时总能被 rename 覆盖；Windows 仅接受实际 `EPERM` 分支，检查失败替换不改变两份文件、原内容仍正确读取/校验，并确认句柄关闭后替换成功。POSIX 继续验证读取期间原子替换；没有 skip 这两项或放宽 hash/CAS。
 - 生产修改仅在 `archive/reader.ts`，不改公开签名、Format 0.1、Writer、资源发布、运行依赖或版本语义。
-- 本地针对性 37 项通过；完整 `npm run check` 为 183 项（182 通过、1 项 Windows 专用跳过），真实 tarball runtime 与双 TypeScript consumer 通过；修复后的远端矩阵待验证，未提前标记 Windows 成功。
+- 本地针对性 37 项通过；完整 `npm run check` 为 183 项（182 通过、1 项 Windows 专用跳过），真实 tarball runtime 与双 TypeScript consumer 通过。
+- 远端 Windows Node 22/24/26 每组均为 179 通过、0 失败、4 项既有平台限定测试跳过；skip 为 POSIX mode、私有权限、动态修改进程时区和极端 umask，本次没有新增 skip。Linux/macOS Node 22/24/26 和额外 Linux Node 20 也全部通过。
+- 全部 10 组均完成安装、`npm run check` 与真实 tarball runtime/双 TypeScript consumer；Linux Node 24 的 benchmark smoke 通过。首次失败记录保留，Windows 目录项断电持久性仍弱于 POSIX；没有实际 npm 发布，scope/License/版本选择继续留给 owner。
 
 ## `a05b4d0` — `test: harden core packaging, conformance and release checks`
 

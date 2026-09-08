@@ -1,6 +1,6 @@
 # 兼容性与平台边界
 
-当前仍是 `0.0.0-development`，未发布稳定 npm 包。本文记录 M6 已建立的自动检查与拟用于 Core 0.1 的维护规则，不把未运行的 CI 或未确认的发布身份说成已经完成。
+当前仍是 `0.0.0-development`，未发布稳定 npm 包。本文记录 M6 已通过的自动检查与拟用于 Core 0.1 的维护规则；CI 通过不等于发布身份已经确认或稳定包已经发布。
 
 ## 运行环境
 
@@ -9,12 +9,14 @@ Core 是 Node.js ESM 库，唯一入口为 `@mdv/core`。不提供 CommonJS `req
 | 环境 | 验证状态 |
 | --- | --- |
 | macOS arm64 / Node 26.3.0 | M6 本地全量测试、独立 tarball/类型检查、性能基准已通过 |
-| Linux、macOS / Node 22、24、26 | 首次 CI 的 6 组安装、测试和 tarball consumer 已通过 |
-| Windows / Node 22、24、26 | 首次 CI 的 3 组失败；目录输入分类及两项打开期间替换测试正在修复，尚未通过矩阵验收 |
-| Linux / Node 20 | 首次 CI 额外回归 job 已通过；不将保留旧运行时兼容等同于其仍受上游维护 |
+| Linux、macOS / Node 22、24、26 | 修复提交 `52f1d33` 的 6 组安装、测试和 tarball consumer 已通过 |
+| Windows / Node 22、24、26 | 修复提交的 3 组安装、测试和 tarball consumer 已通过；每组 179 项通过、0 失败、4 项既有平台限定测试跳过 |
+| Linux / Node 20 | 修复提交的额外回归 job 已通过；不将保留旧运行时兼容等同于其仍受上游维护 |
 | TypeScript 5.9.3 和仓库当前编译器 7.x | 独立 tarball consumer 通过 strict NodeNext 类型检查；不需要调用方安装 ZIP 库类型或 `@types/node` 才能使用公开声明 |
 
-CI 定义见 [ci.yml](../.github/workflows/ci.yml)，首次结果见 [a05b4d0 的运行记录](https://github.com/owariband/mdv/actions/runs/34193052019)。正式发布前需查看目标提交在所有 job 的实际结论。Node 版本维护状态以 [Node.js 官方发布计划](https://github.com/nodejs/Release#release-schedule)为准。
+CI 定义见 [ci.yml](../.github/workflows/ci.yml)。2026-09-08，[修复提交 `52f1d33` 的运行记录](https://github.com/owariband/mdv/actions/runs/34193879318)为 10/10 成功；每组都完成 `npm run check` 与真实 tarball runtime/双 TypeScript consumer 验证，Linux / Node 24 的 benchmark smoke 也通过。首次 Windows 失败及修复原因保留在[开发日志](./design/dev_log.md)，没有覆盖历史失败记录。正式发布前仍需查看待发布提交在所有 job 的实际结论。Node 版本维护状态以 [Node.js 官方发布计划](https://github.com/nodejs/Release#release-schedule)为准。
+
+Windows 的 4 项 skip 分别是 POSIX 只读 mode、私有权限保持、动态修改进程时区和极端 umask 用例；本次修复的两项文件替换测试实际执行，没有新增 skip。CI 证据限于这些 runner、运行时和测试范围，不代表所有文件系统或真实断电场景都已经验收。
 
 ## 文件系统与一致性
 
