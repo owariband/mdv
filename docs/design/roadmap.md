@@ -578,7 +578,7 @@ MarkText adapter 位于 `../markText`，不进入 `@mdv/core`。Muya State 不�
 
 ### U3：独立 CLI / Agent tool
 
-状态：**A0/A1 默认权限版已通过 `6e41aaa` 推送；提供可选 Codex 个人 Skill，宿主安装状态单独记录**
+状态：**A0/A1 已通过 `6e41aaa` 推送；个人 Skill `07ab810` 已安装，本机跨项目发现与实际 CLI 验证通过**
 
 CLI 已放在 `adapter/mdv_agent_tool/`，仍是完全独立于 Core 的上游 package：
 
