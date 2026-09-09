@@ -4,6 +4,9 @@
 
 ## 2026-09-09
 
+- 已将 U1 成果 `2d68ef6` 和详细日志 `416c666` 推送至 `origin/main`；后者对应 [CI](https://github.com/owariband/mdv/actions/runs/34306309915) 10/10 成功。未改写历史，个人测试文档、telemetry ignore 和全局 Git 配置未动。
+- 按用户新要求在独立 `adapter/mdv_agent_tool/` 实现 A0/A1：同时返回 Ref/Doc，默认仅 Doc 工作副本可写；历史读取按精确 bind，严格身份/generation、参数/预算/错误输出，不改 ZIP 或 Core。19 项真实子进程在 Node 20/26 通过，仓库外安装后 19 项通过。新增实际 CLI → VS Code 刷新/dirty 保护通过；完整 UI 回归剩 1 项撤销失败，记录 O006，不宣称全套通过。本批 Agent 代码尚未提交或推送，未给宿主自动安装/注册。
+
 - 汇总 U1 到 `preview.6`：侧栏自适应且不抢焦点、Webview ready 后切换原生编辑器以修复销毁竞态、猫头活动栏图标。推送前 Core 188 通过/1 平台 skip，最新 VSIX 基础安装回归 20 项通过且 renderer 日志无销毁错误；此前可选 Markdown 扩展和 reload/Restricted Mode 结果分别记录。同步插件方案和索引，保留未验证的平台边界。
 
 ## 2026-09-08

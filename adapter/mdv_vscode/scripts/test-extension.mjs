@@ -43,6 +43,7 @@ const options = {
   extensionTestsPath: join(root, 'dist/test.cjs'),
   extensionTestsEnv: { MDV_TEST_WORKSPACE: workspace, MDV_TEST_RESTRICTED: restricted ? '1' : '0',
     MDV_TEST_MARKDOWN_EXTENSION: markdownExtension ? '1' : '0', MDV_TEST_CDP_PORT: String(port),
+    ...(argument('--agent-cli') ? { MDV_TEST_AGENT_CLI: resolve(argument('--agent-cli')), MDV_TEST_AGENT_NODE: process.execPath } : {}),
     MDV_TEST_RECOVERY: recovery },
   launchArgs: [workspace, '--user-data-dir', userData, '--shared-data-dir', join(temporary, 'shared-data'), '--extensions-dir', join(temporary, 'extensions'),
     '--skip-welcome', '--skip-release-notes', '--disable-updates', '--disable-telemetry',

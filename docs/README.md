@@ -18,6 +18,13 @@
 | 实现其他语言的兼容 Reader/Writer | [Container Format 0.1](../spec/format-0.1.md) |
 | 参与 Core 设计和后续开发 | [维护者设计索引](./design/index.md) |
 
+## 独立上游工具
+
+- [VS Code 插件](../adapter/mdv_vscode/README.md)：原生 Markdown 编辑与预览、双列版本图和精确 bind；本地 VSIX。
+- [Agent Tool](../adapter/mdv_agent_tool/README.md)：一次读取 Ref/Doc，默认只保存正文；本地 CLI 安装包，不启动服务，不自动 commit。
+
+它们分别安装，不是 Core 的内部层，也不会由安装 Core 自动给 Agent 装配。具体默认权限和平台证据见各自说明。
+
 ## 当前能力边界
 
 | 能力 | 状态 |

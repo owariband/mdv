@@ -10,6 +10,7 @@
 - 理由：减少重复事实来源，文件扩展名只负责关联，Reader 仍验证 manifest。
 - 影响：Reader 必须把 ZIP 当作不可信输入；格式识别不能只看扩展名。
 - 证据：[Format 0.1](../../spec/format-0.1.md)、[架构 §4](./architecture.md#4-mdv-物理格式)
+- 2026-09-09 再确认：讨论纯文本 Ref/Doc 分段和历史外置后，用户选择保留当前容器思路；没有执行格式迁移。Agent-friendly 通过独立适配工具提供，不要求普通 `cat` 自动解析 ZIP。
 
 ## D002：Reference 与 Document 使用两棵版本树
 
@@ -164,3 +165,15 @@
 - 数据边界：可编辑两侧均为当前工作副本，并排不产生永久 bind；历史 Version 仍不可变，历史 bind 仍指向精确 Ref Version。Core 的保存、冲突、图片和容器规则不改，侧栏显隐属于宿主状态，不写入 MDV manifest。
 - 本机验收：19 项安装版集成检查通过，覆盖双列版本/分叉/独立 HEAD、反查全部 Doc、精确 Ref、多对一/unbound、草稿状态、只读历史、普通新建/已有包直接打开、显隐不丢正文/选区/undo/基线、多包图切换与无关标签保留。隐藏旧草稿在外部写入后仍拒绝保存；真实窗口 reload 后 Doc 和隐藏 Ref 均恢复，无外部变化可保存，外部 writer 获胜则阻止旧基线覆盖；Restricted Mode 只读检查通过。平台与大型图未验证范围见插件方案 §8.2。
 - 证据：[公开版本/反向引用 API](../../src/types.ts)、[public 查询实现](../../src/mdv-document.ts)、[侧栏实现](../../adapter/mdv_vscode/src/version-view.ts)、[版本拓扑与分支](../../adapter/mdv_vscode/src/version-graph.ts)、[原生编辑命令](../../adapter/mdv_vscode/src/commands.ts)、[安装回归](../../adapter/mdv_vscode/test/index.ts)、[侧栏 Webview 官方能力](https://code.visualstudio.com/api/extension-guides/webview)、[原生移动编辑器命令](https://code.visualstudio.com/api/references/commands)。本次展示开发没有修改 Core 生产代码或格式。
+
+## D017：Agent 默认成对读取、仅正文可写
+
+- 日期：2026-09-09
+- 状态：Accepted / Implemented（A0/A1 开发预览）。
+- 来源：用户确认保留容器格式，要求先推送现有插件成果，再开发“同时返回 Ref 和正文、默认只允许修改正文”的 Agent 工具。
+- 决定：独立 `adapter/mdv_agent_tool/` 默认只开放成对 `read` 与 `save-document`。读取当前已保存工作副本，或根据历史 Doc 的精确 bind 读取历史配对；未绑定明确表达，不把新 Ref 混入旧 Doc。
+- 权限：Ref 与历史只读；不开放 Ref 写、commit/checkout、资源导入或提权开关。额外字段与历史写目标明确拒绝。权限由实际动作入口实施，不以 Skill 提示词代替校验。
+- 写入：请求携带原文档身份、原 generation 和完整 Doc Markdown；只调用 Core `saveDocument`，保留 Ref/HEAD/历史/bind，普通保存不创建版本，遇冲突不自动重试。
+- 边界：这是 adapter 能力约束，不修改 Core 的通用两树写 API、文件格式或宿主的人类权限。具有任意 shell/文件写能力的 Agent 仍需宿主级沙箱约束；工具本身不是 OS 权限系统。
+- 取代：原 Agent 草案 A1 的“两树 save”和默认一律 JSON 输出；改为默认可读两段文本、可选精确 JSON。其他命令仍是待另行授权的后续设计。
+- 证据：[实现与安装](../../adapter/mdv_agent_tool/README.md)、[真实子进程回归](../../adapter/mdv_agent_tool/test/cli.test.mjs)、[方案](./agent_tool.md)。19 项 Node 20/26 及独立安装检查通过；CLI → VS Code 新增用例通过，完整 UI 剩余失败单独记 O006。

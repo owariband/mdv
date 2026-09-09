@@ -22,6 +22,8 @@ M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务�
 
 2026-09-09 本地交付更新至 `preview.6`：侧栏适配可用宽高，打开文档不抢占用户的侧栏选择；包入口在 Webview 加载确认后才切换到原生 Doc，修复重复打开的销毁竞态；活动栏复用项目猫头 SVG。最新安装版基础回归 20 项通过，此前含 Markdown All in One 的 21 项及两种 reload/Restricted Mode 验证单独保留；详见[插件方案 §8.3](./vscode_plugin.md#83-preview4preview6-交付2026-09-09)。
 
+2026-09-09 U3 A0/A1 已实现：[`adapter/mdv_agent_tool/`](../../adapter/mdv_agent_tool/README.md) 提供成对读取（默认文本/可选 JSON）、历史 Doc 精确 bind 读取和仅正文保存。默认不开放 Ref/历史修改，写入必须携带旧文档身份/generation；ZIP 与 Core public API 不变。19 项 Node 20/26 子进程回归及独立安装包验证通过，CLI 不自动给宿主注册工具；此前“仅有设计”的记录被此状态更新取代。
+
 ## 页面
 
 - [架构与产品设计](./architecture.md)：格式语义、领域模型、最终行为和安全边界。

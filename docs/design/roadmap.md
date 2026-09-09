@@ -578,18 +578,18 @@ MarkText adapter 位于 `../markText`，不进入 `@mdv/core`。Muya State 不�
 
 ### U3：独立 CLI / Agent tool
 
-状态：**下一步：设计已记录，与 U1 联调**
+状态：**A0/A1 默认权限版已实现；宿主装配单独执行**
 
-CLI 计划放在 `adapter/mdv_agent_tool/`，仍是完全独立于 Core 的上游 package：
+CLI 已放在 `adapter/mdv_agent_tool/`，仍是完全独立于 Core 的上游 package：
 
 - 只依赖 `@mdv/core` package root；
 - 将 argv、stdin、stdout、JSON envelope 和退出码映射到 Core public API；
-- 为 Agent Runtime 提供 create/open/status/read/save/commit/checkout/trace/diff/verify 等工具动作；
+- 当前只提供成对 `read` 和 `save-document`，另可按历史 Doc 的精确 bind 成对读取；默认禁止 Ref/历史写入，不自动 commit；
 - 遵守 `expectedGeneration` 和稳定错误码；
 - 不直接解包修改 entry，也不复制 Core 的版本规则；
 - 不要求 Core 启动服务或常驻进程。
 
-CLI 命令、JSON 协议、跨调用 documentId/generation 和 A0–A3 验收在 [Agent Tool 方案](./agent_tool.md)中单独维护，均为待实现设计；不进入 Core public model，也不要求插件通过 CLI 执行自己的保存。
+命令、文本/JSON 输出、跨调用 documentId/generation 和 A0–A3 验收在 [Agent Tool 方案](./agent_tool.md)中单独维护。A0/A1 的 19 项真实子进程检查已在 Node 20/26 通过，仓库外 tarball 安装后同样通过。create/status/versions/trace/diff/verify 等独立命令和有权限的 Ref/版本/图片修改仍是后续设计，不因 Core 已有方法而默认开放；不进入 Core public model，也不要求插件通过 CLI 执行自己的保存。
 
 ## 6. 下一批开发任务
 
@@ -597,7 +597,7 @@ M6 的工程交付与跨平台 CI 验收已完成；首次 Windows 失败已修�
 
 1. U1 已交付：独立 Core tarball consumer、原生虚拟 Markdown 编辑/预览、手动与自动保存、图片 provider、commit/checkout、精确 bind、外部变化保护和本机 VSIX 安装/恢复验证；Core 生产代码与保存策略未改。
 2. 下一轮 U1 试用验收覆盖真实剪贴板/拖入、用户选定的其他 Markdown renderer、最低 VS Code 与 Windows/Linux GUI；已有 macOS 实测不外推为全平台承诺。
-3. 经用户确认后按 A0–A3 实现独立 Agent tool，再进行真实 Agent 保存 → 插件刷新/冲突的联合验收；当前插件测试中的外部 writer 是 Core 调用，不冒充已交付 CLI。
+3. 2026-09-09 已按用户“读取两段、默认只改正文”要求完成 Agent A0/A1；真实安装后 CLI → 插件 clean 刷新/dirty 保护用例已通过。扩展完整 UI 回归暴露的既有撤销问题单独列入 O006，不把 20/21 说成全套通过；后续先确认宿主装配和更高权限，再扩展 A2/A3。
 4. 在真实宿主中测保存频率与历史规模；已有本机基线不等于验证了 10,000 Version / 512 MiB 上限或断电持久性。
 5. 正式公开分发前由 owner 确认 npm scope、发布权限、License 和版本策略；运行严格 release gate、最终产物与目标提交 CI，记录真实版本后再将 M6 标为正式发布完成。MarkText 排在首个客户端验证之后。
 

@@ -1,10 +1,10 @@
 # MDV Agent Tool 开发方案
 
-> 最后更新：2026-09-08
+> 最后更新：2026-09-09
 >
-> 状态：开发设计草案，命令、协议和目录尚未实现；示例不能视为当前可执行命令。
+> 状态：A0/A1 最小默认权限版已在本地实现，产物为 `@mdv/agent-tool 0.1.0-preview.1`；当前只开放 `read` 和 `save-document`。原来的完整命令面保留为远期草案，不是当前能力。
 >
-> 计划位置：当前仓库的 `adapter/mdv_agent_tool/`，独立 package；第一版采用一次性 CLI。
+> 实现位置：当前仓库的 [`adapter/mdv_agent_tool/`](../../adapter/mdv_agent_tool/README.md)，独立 package；第一版采用一次性 CLI。
 >
 > 配套方案：[VS Code 插件](./vscode_plugin.md)；当前契约：[Core API](../api-reference.md)；排期：[路线图](./roadmap.md)。
 
@@ -16,6 +16,19 @@
 
 Core 已经提供 read/save/commit/checkout/trace/status/diff/verify 和图片 API；Agent 专用的 argv、JSON envelope、退出码和工具说明属于本 adapter。代码依据是 [`src/index.ts`](../../src/index.ts)、[`src/types.ts`](../../src/types.ts) 和 [`src/mdv-document.ts`](../../src/mdv-document.ts)。
 
+### 1.1 当前交付与默认权限（2026-09-09）
+
+用户明确要求保留 ZIP 容器，Agent 读取时同时获得 Ref 和正文，默认只能修改正文。该要求收窄原 A1 的“两树 save”，也覆盖原先 stdout 一律 JSON 的草案：
+
+- `mdv read --file <path.mdv>` 默认文本，固定 `reference document:` / `actual document:` 两段，另附身份、generation、来源与权限说明；`--json` 返回精确字符串和结构化字段。
+- 当前读取来自同一次 Core 打开的两份已保存工作副本；不创建 bind，不读取 VS Code 未保存 buffer。`--document-version <id>` 读取历史 Doc 及其精确绑定的历史 Ref，unbound 明确为 `source: null`，不使用最新 Ref 顶替。
+- `mdv save-document --file <path.mdv> --input <request.json|->` 只接受 `expectedDocumentId`、`expectedGeneration`、`markdown`；只保存 Doc 工作副本。Ref、两棵 HEAD、版本和 bind 均不改变，不自动 commit。
+- Ref 写入、commit/checkout、资源导入、create 均不开放；禁止历史写目标、额外 tree/permissions 字段和提权开关。权限校验发生在实际 CLI 入口，不只是工具描述或提示词。
+- 这是工具能力限制，不是 OS 沙箱；若 Agent 还有任意 shell/文件写权限，宿主仍须限制绕过工具的途径和路径范围。MCP、Skill 安装和宿主自动注册均未实现。
+- `src/cli.ts` 管参数、限量 I/O 与退出码；`commands.ts` 只调用 Core public API 并核对跨调用身份；`protocol.ts` 管必要的 JSON 类型与格式。没有修改 Core、引入服务或再造版本/锁协议。
+
+后文完整动作的 actor、commit 和图片等契约只供未来扩展参考，不能解释为默认授予 Agent 这些权限。可执行说明以 [adapter README](../../adapter/mdv_agent_tool/README.md) 为准。
+
 ## 2. 工程位置与依赖
 
 按用户 2026-09-08 提议，与插件同放于仓库根 `adapter/`；完整仓库布局和产物隔离规则见[插件方案 §2](./vscode_plugin.md#2-仓库布局与包边界)。
@@ -25,12 +38,13 @@ adapter/mdv_agent_tool/
 ├── package.json          # 独立依赖和 bin；命令名暂定 mdv
 ├── package-lock.json
 ├── tsconfig.json
+├── scripts/              # 独立 Core tarball、构建与安装验证
+├── vendor/               # 本地 Core 产物；忽略入库
 ├── src/
 │   ├── cli.ts            # argv、输入读取、输出和退出码
 │   ├── commands.ts       # 输入校验、Core 调用、有限结果投影
 │   └── protocol.ts       # JSON 请求/响应类型及边界检查
 ├── test/
-│   ├── protocol.test.mjs
 │   └── cli.test.mjs      # 启动真实子进程验证
 └── README.md             # 安装、调用、权限与 Agent 装配说明
 ```
@@ -39,7 +53,9 @@ adapter/mdv_agent_tool/
 
 初始可从 Core tarball 独立安装并固定构建，Node 要求不低于 Core 当前的 `>=20`；正式 npm 身份和版本仍需 owner 确认。根 Core 的构建、测试、发布与 `bin` 保持不变；没有 adapter 时 Core 仍能独立交付。
 
-## 3. 命令面草案
+## 3. 完整命令面草案（远期，非当前权限）
+
+当前 `read` 不需要 `sources` 请求；它始终返回两段。当前唯一写命令为 `save-document`，其余表中动作尚未开放。
 
 统一调用形态暂定为：
 
@@ -84,9 +100,9 @@ mdv <command> --file <mdv-path> [--input <request.json|->]
 
 ### 4.2 JSON 输出与退出码
 
-正常命令 stdout 只输出一个 JSON 对象及末尾换行；日志与操作说明写 stderr，`--help` / `--version` 单独作为人类入口。协议版本与 Core 库版本、MDV Format 版本分开。
+当前 `read` 默认输出带来源/基线的成对文本，`--json` 读取、保存和失败输出一个 JSON 对象及末尾换行；日志与操作说明写 stderr，`--help` / `--version` 单独作为人类入口。协议版本与 Core 库版本、MDV Format 版本分开。文本展示会增加分隔换行，不能解析标题来回写正文；精确读写使用 JSON。
 
-建议的成功 envelope：
+当前读取的成功 envelope（ID 为占位符）：
 
 ```json
 {
@@ -95,17 +111,15 @@ mdv <command> --file <mdv-path> [--input <request.json|->]
   "data": {
     "documentId": "d_...",
     "generation": 7,
-    "contents": [
-      {
-        "source": { "tree": "document", "kind": "working-copy" },
-        "text": "# Draft\n"
-      }
-    ]
+    "baseDirectory": "/workspace",
+    "reference": { "source": { "tree": "reference", "kind": "working-copy" }, "text": "# Reference\n" },
+    "document": { "source": { "tree": "document", "kind": "working-copy" }, "text": "# Draft\n" },
+    "permissions": { "reference": "read-only", "document": "read-write" }
   }
 }
 ```
 
-这里只展示 `read` 的结果形态，ID 为占位符；具体值必须取工具实际输出。save/commit 的 `data` 返回精简的新状态，不重复整份正文；commit 保留 Core `created` 联合结果的语义。
+具体值必须取工具实际输出。当前 save 的 `data` 只返回新 `documentId` / `generation`，不重复整份正文；未来 commit 才需要保留 Core `created` 联合结果的语义。
 
 失败 envelope 为 `{ protocolVersion: 1, ok: false, error: { origin, code, message, details? } }`：
 
@@ -115,13 +129,14 @@ mdv <command> --file <mdv-path> [--input <request.json|->]
 | argv、JSON 或输入类型错误 | `2` | `origin: adapter`，如 `INVALID_ARGUMENT` |
 | 预期文件/版本/并发失败 | `3` | Core 失败保留原 code/details；跨调用身份冲突标明来自 adapter |
 | adapter 传输超限 | `2` | `origin: adapter`，`LIMIT_EXCEEDED`，不伪装成坏 MDV |
+| 默认权限拒绝 | `4` | `origin: adapter`，`PERMISSION_DENIED`，不进入写事务 |
 | 意外实现或输出失败 | `1` | `origin: adapter`，`INTERNAL_ERROR` / `OUTPUT_ERROR`，不泄露堆栈或正文 |
 
 所有 Core 错误码原样透传，不靠英文 message 分支；adapter 自身错误不增加 Core `MdvErrorCode`。`verify` 成功获得报告时为 `ok: true` / exit 0，即使 `valid: false`；调用方必须检查 `valid` 与 `complete`，不能把进程成功等同于归档完整。
 
 ### 4.3 输入输出预算
 
-初版传输预算建议为 JSON 请求 16 MiB、JSON 响应 32 MiB，`read.sources` 限 1–16 个；在 contract test 中冻结并写入 help。它们是 adapter 的传输限制，不改变 Core 的[内容预算](../compatibility.md#默认预算)。图片文件单独按 Core 默认 32 MiB 限量读取。
+当前传输预算为 JSON 请求 16 MiB、JSON 响应 32 MiB；stdin 和文件同样限量，计入 JSON 转义与包装，默认文本读取也检查对应结构化结果预算。多来源按需读取和图片输入尚未开放，原 `read.sources` 1–16 个与图片 32 MiB 仅保留为后续草案。它们是 adapter 的传输限制，不改变 Core 的[内容预算](../compatibility.md#默认预算)。
 
 入口限量读取 stdin/输入文件；未知字段和不合法参数明确拒绝。超大正文/诊断整体报超限，不默默截断后让 Agent 当作完整文件回写；扩展流式或分段传输应另立协议方案。写操作的正常响应只包含有界状态，预先校验可知的参数和预算；stdout 管道中断或进程被终止仍不代表写入已回滚。
 
@@ -175,7 +190,7 @@ Agent Runtime -> mdv_agent_tool -> @mdv/core -> 同一份 .mdv + sidecar
 推荐流程：
 
 1. 用户在 VS Code 保存并提交 Ref，得到明确的 Reference Version。
-2. Agent 通过 `read` 读取该 Ref Version 与 Doc 工作副本，取得 documentId/generation；需要 bind 背景时调用 trace。
+2. Agent 通过当前 `read` 读取已保存 Ref 与 Doc 工作副本，取得 documentId/generation；如果要基于步骤 1 的已提交 Ref，用户应确保 Ref 当前正文仍与它一致，不能把未提交 Ref 草稿当成那个历史版本。历史成对读取可显式选 Doc Version；独立 trace 命令尚未开放。
 3. Agent 根据读取结果生成 Markdown，通过 `save-document` 携带原基线写入；成功后消费新 generation，不创建 Version。
 4. 插件检测磁盘变更：无未保存编辑时刷新，有未保存编辑时保留并提示冲突。
 5. 用户 review 后显式 commit Doc，绑定步骤 1 的 Ref；以后 trace 仍能读取这对历史正文。
@@ -186,12 +201,12 @@ Agent Runtime -> mdv_agent_tool -> @mdv/core -> 同一份 .mdv + sidecar
 
 | 阶段 | 交付 | 验收 |
 | --- | --- | --- |
-| A0 包与协议 | 独立包、真实 Core tarball 安装、help、JSON envelope、参数校验和错误码 | 干净目录构建；子进程 stdout 只有一个协议结果；不依赖插件或根源码 |
-| A1 最小读写 | create/open/status/read、versions/trace、两树 save | Agent 读 Ref/Doc 后 save，插件观察到变化；save 不增 Version |
-| A2 版本与图片 | 显式 commit、受保护 checkout、import/resolve/verify-resource | 精确 bind、身份+generation 冲突、图片历史回读与失败恢复 |
+| A0 包与协议（本地完成） | 独立包、真实 Core tarball 安装、help、文本/JSON 输出、输入预算和错误码 | 真实子进程及仓库外安装包验证；不依赖插件或根源码 |
+| A1 最小默认权限（本地完成） | 成对 read、历史精确成对 read、仅 save-document | Ref/HEAD/历史/bind 不变；身份/generation 冲突拒绝；不自动 commit |
+| A2 版本与图片（未实现） | 需要用户重新确认权限后才设计 commit/checkout/资源动作 | 不因 Core 已有方法就默认授予 Agent |
 | A3 诊断与交付 | diff/full verify、预算回归、可安装 CLI、Agent 使用说明 | 独立安装及三系统子进程回归，真实 Agent 与 VSIX 联合验收 |
 
-A1 可以先用于 Agent 保存正文、由插件负责用户 commit 的联调；完整首版要完成 A2/A3，不把尚未实现的命令放进“当前可用”清单。
+A0/A1 已满足本轮“成对读取 + 默认只改正文”的首版交付，用户在插件负责 Ref 和 commit；不再以原先完整 A2/A3 命令面作为本轮门槛，不把未实现命令放进“当前可用”清单。19 项子进程测试在 macOS Node 20.20.2 和 26.3.0 通过；真实 tarball 在仓库外安装后重复 19 项通过。VS Code 联合测试与 UI 回归结果另行记录，不以 Core 直接外部写入替代真实 CLI。
 
 重点测试：
 

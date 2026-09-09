@@ -53,3 +53,15 @@
 - 问题：浏览器、远端或虚拟文件系统是否需要从现有 I/O seam 提取 storage interface。
 - 当前结论：只有 ZIP + 本地文件一种实现，不增加 Repository/Provider/Factory。
 - 下一检查：第二个可运行后端提出具体约束时再设计。
+
+## O006：原生撤销回归在 Agent 联合检查中失败
+
+- 状态：Open（2026-09-09 新观察）
+- 所属阶段：U1 插件回归，不是 Core 或 Agent 读写权限
+- Owner：VS Code adapter maintainer
+- 现象：macOS / VS Code 1.136.1 / Extension Host Node 24.18.1，在已有两侧保存用例后给原生 Doc 插入 `prefix `，执行 `undo` 后文本仍保留前缀；增加显式编辑组聚焦和最长 10 秒状态等待后仍可复现。没有证据将其直接归因于 Core、CLI 或用户操作。
+- 对照：本轮推送前基础 20 项曾通过；新增真实 CLI 联动后的两次完整运行均有撤销/宽度断言失败。截图确认宽度断言未扣除原生竖滚动条，按实际 viewport 修正后通过，最新完整结果为 20/21；真实 CLI 成对读取、仅 Doc 保存和 clean/dirty 协作均通过。
+- 范围：这轮没有修改 Core 或插件生产逻辑；其他新建/隐藏原生文档的 undo 检查仍通过。不能把这一条当作已修复，也不回写旧记录为从未失败。
+- 本机证据：runner 打印的隔离目录尾名 `mdv-vscode-test-7PfAFS`、`mdv-vscode-test-ejnsd1`、`mdv-vscode-test-16q77Q` 内保存 `workspace/test-results.json`；最新撤销超时，新增 Agent CLI 用例通过。
+- 可重复命令：在 `adapter/mdv_vscode/` 执行 `npm test -- --vscode <VS Code executable> --installed --agent-cli <installed cli.cjs>`。
+- 下一检查：隔离跨用例焦点/全局 undo 路由与已保存文本模型的撤销栈变化，确认是测试上下文还是可复现的产品缺陷；保留真实断言，不通过删除用例或扩大等待冒充修复。

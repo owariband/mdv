@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdir, readFile, rename, symlink, writeFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
+import { promisify } from 'node:util'
 import * as vscode from 'vscode'
 import { chromium, type Frame } from 'playwright-core'
 import { createMdv, openMdv, verifyMdv, type ContentSpec } from '@mdv/core'
@@ -188,12 +190,16 @@ export async function run(): Promise<void> {
 
   await check('native undo and redo preserve the unsaved editor model', async () => {
     await vscode.window.showTextDocument(document!)
+    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup')
+    await until(() => vscode.window.activeTextEditor?.document === document, 'Doc is the active undo target')
     const original = document!.getText()
     const editor = vscode.window.activeTextEditor!
     await editor.edit((edit) => edit.insert(new vscode.Position(0, 0), 'prefix '))
     await vscode.commands.executeCommand('undo')
+    await until(() => document!.getText() === original, 'undo reaches the Extension Host text model')
     assert.equal(document!.getText(), original)
     await vscode.commands.executeCommand('redo')
+    await until(() => document!.getText() === 'prefix ' + original, 'redo reaches the Extension Host text model')
     assert.equal(document!.getText(), 'prefix ' + original)
     assert.equal(await document!.save(), true)
   })
@@ -590,12 +596,13 @@ export async function run(): Promise<void> {
         await page.mouse.move(box.x + targetWidth, box.y + box.height / 2, { steps: 8 })
         await page.mouse.up()
         await delay(100)
-        const dimensions: { width: number; height: number; graphWidth: number;
+        const dimensions: { width: number; height: number; graphWidth: number; viewportWidth: number; viewportOuterWidth: number;
           overflow: number; graphOverflow: number; footerBottom: number; dotsInside: boolean } = await view.evaluate(`(() => {
           const viewport = document.getElementById('viewport')
           const graph = document.getElementById('graph')
           const footer = document.querySelector('footer').getBoundingClientRect()
           return { width: innerWidth, height: innerHeight, graphWidth: graph.clientWidth,
+            viewportWidth: viewport.clientWidth, viewportOuterWidth: viewport.offsetWidth,
             overflow: document.documentElement.scrollWidth - innerWidth,
             graphOverflow: viewport.scrollWidth - viewport.clientWidth, footerBottom: footer.bottom,
             dotsInside: [...document.querySelectorAll('.dot')].every(dot => +dot.getAttribute('cx') > 0 && +dot.getAttribute('cx') < graph.clientWidth) }
@@ -603,7 +610,9 @@ export async function run(): Promise<void> {
         const resized = (await sidebar.boundingBox())!
         await page.screenshot({ path: join(workspace, `version-graph-${targetWidth}.png`) })
         assert.ok(Math.abs(resized.width - targetWidth) <= 2, `The real sidebar was resized to ${targetWidth}px, got ${resized.width}px; webview ${dimensions.width}px`)
-        assert.ok(Math.abs(dimensions.graphWidth - dimensions.width) <= 2)
+        // Native vertical scrollbars consume layout width on some host configurations.
+        assert.ok(Math.abs(dimensions.graphWidth - dimensions.viewportWidth) <= 2, JSON.stringify(dimensions))
+        assert.ok(Math.abs(dimensions.viewportOuterWidth - dimensions.width) <= 2, JSON.stringify(dimensions))
         assert.ok(dimensions.overflow <= 1 && dimensions.graphOverflow <= 1, 'Graph fits without horizontal scrolling')
         assert.ok(Math.abs(dimensions.footerBottom - dimensions.height) <= 1, 'View fills the sidebar height')
         assert.equal(dimensions.dotsInside, true)
@@ -657,6 +666,50 @@ export async function run(): Promise<void> {
     assert.equal((await verifyMdv(file.fsPath, { mode: 'full' })).valid, true)
     const bytes = await readFile(file.fsPath)
     assert.equal(bytes.subarray(0, 2).toString(), 'PK')
+  })
+
+  if (process.env.MDV_TEST_AGENT_CLI) await check('real Agent CLI reads the pair, saves only Doc, refreshes clean editors and protects dirty ones', async () => {
+    const target = vscode.Uri.file(join(workspace, 'agent tool.mdv'))
+    let initial = await createMdv(target.fsPath)
+    initial = await initial.saveReference({ markdown: '# Human Ref\n', expectedGeneration: 0 })
+    const committed = await initial.commitReference({ expectedGeneration: initial.manifest.generation,
+      actor: { type: 'human' }, summary: 'Agent reference' })
+    initial = committed.document
+    const uri = sourceUri(target, initial.manifest.documentId, { tree: 'document', kind: 'working-copy' })
+    const editor = await vscode.workspace.openTextDocument(uri)
+    await vscode.window.showTextDocument(editor)
+    const runCli = async (...args: string[]) => {
+      const output = await promisify(execFile)(process.env.MDV_TEST_AGENT_NODE!, [process.env.MDV_TEST_AGENT_CLI!, ...args],
+        { timeout: 15_000, maxBuffer: 1024 * 1024 })
+      assert.equal(output.stderr, '')
+      const response = JSON.parse(output.stdout)
+      assert.equal(response.ok, true)
+      return response.data
+    }
+    const input = join(workspace, 'agent-input.json')
+    const pair = await runCli('read', '--file', target.fsPath, '--json')
+    assert.equal(pair.reference.text, '# Human Ref\n')
+    assert.equal(pair.document.text, '')
+    await writeFile(input, JSON.stringify({ expectedDocumentId: pair.documentId,
+      expectedGeneration: pair.generation, markdown: '# Agent first save\n' }))
+    await runCli('save-document', '--file', target.fsPath, '--input', input)
+    await until(() => editor.getText() === '# Agent first save\n', 'real CLI save refreshes clean editor')
+    await replace(editor, '# Human unsaved edits\n')
+    const nextPair = await runCli('read', '--file', target.fsPath, '--json')
+    assert.equal(nextPair.document.text, '# Agent first save\n', 'Agent sees disk, not the unsaved editor buffer')
+    await writeFile(input, JSON.stringify({ expectedDocumentId: nextPair.documentId,
+      expectedGeneration: nextPair.generation, markdown: '# Agent second save\n' }))
+    await runCli('save-document', '--file', target.fsPath, '--input', input)
+    await delay(300)
+    assert.equal(editor.isDirty, true)
+    assert.equal(editor.getText(), '# Human unsaved edits\n')
+    await assert.rejects(Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(editor.getText()))))
+    const saved = await openMdv(target.fsPath)
+    assert.equal(await saved.readDocumentText(), '# Agent second save\n')
+    assert.equal(await saved.readReferenceText(), '# Human Ref\n')
+    assert.deepEqual(saved.referenceTree, initial.referenceTree)
+    assert.deepEqual(saved.documentTree, initial.documentTree)
+    assert.deepEqual(saved.listVersions(), initial.listVersions())
   })
 
   await writeFile(join(workspace, 'test-results.json'), JSON.stringify({

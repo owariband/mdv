@@ -11,9 +11,22 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
+## 2026-09-09 — Agent Tool A0/A1 默认权限版
+
+- 在 `adapter/mdv_agent_tool/` 新增独立 Node 20+ package，提供已捆绑固定 Core 的本地 CLI tarball；不向根 Core 增加 bin、运行依赖或新公开类型，不启动服务。
+- `read` 一次返回当前已保存 Ref/Doc，默认带固定标题的文本，可用 JSON 精确保留字符、换行、来源和保存基线；历史 Doc 读取精确绑定的 Ref，unbound 不拿当前 Ref 顶替。
+- 只开放 `save-document`：请求必须携带原 `expectedDocumentId`、`expectedGeneration` 和 Markdown；Core 事务锁内继续核对身份/generation，拒绝陈旧或同路径换文档的覆盖，不自动重试。
+- Ref、HEAD、既有版本和 bind 不变；保存不创建版本。Ref/版本/图片/create 写命令、历史写目标、额外权限和 tree 字段均拒绝，不提供提权开关。
+- 输入限量 16 MiB，响应计入 JSON 转义/包装限量 32 MiB；拒绝非法 UTF-8、JSON BOM 和未配对代理项，不以截断正文冒充完整成功响应。保留 Core code/details，并区分 stdout 失败与已经写盘的结果。
+- 19 项真实子进程回归在 macOS Node 20.20.2 与 26.3.0 通过，包含两进程竞争、身份替换、默认权限、空文件、精确历史和管道中断；仓库外独立安装 CLI 后重复 19 项通过。不声明未跑的 Windows/Linux 运行时。
+- 增加可选真实 CLI → VS Code 联合用例：成对读取、保存正文后的 clean 刷新、保留人的 dirty 文本并拒绝旧写入，检查 Ref/历史不变；该用例通过。完整插件回归最新 20/21，剩既有原生撤销用例失败；原生滚动条宽度测试已纠正，未改插件生产代码。详细失败证据保留在 O006，不把整套记为通过。
+- 使用说明包含宿主两个动作的装配方式与权限边界：工具不是 OS 沙箱，有任意 shell/文件写能力的 Agent 仍可能绕过它。未创建 MCP/Skill、自动注册宿主、全局安装或发布 npm。
+- 同步 Agent 方案、默认权限决策、路线图、索引、维护日志和调用方入口；此前完整命令面仍保留为后续草案，不把 Ref 修改或版本权限默认为已交付。
+
 ## `2d68ef6` — `feat: deliver VS Code adapter and ordinary MDV editing`
 
 - 完整 SHA：`2d68ef62d902b48b0bfc7f7e950f80a427642f46`
+- 推送状态：功能与日志提交 `416c666` 已推送至 `origin/main`；[该批次 Core CI](https://github.com/owariband/mdv/actions/runs/34306309915) 三系统 10 组全部成功。此 CI 不包含后续本地 Agent adapter。
 - 日期：2026-09-09
 - 交付批次：U1 VS Code 本地预览版，包含历次试用修正，产物升级至 `0.1.0-preview.6`。
 - 新增独立 `adapter/mdv_vscode/`，只消费 Core package root；本地构建、tarball 校验、VSIX 安装和隔离 Extension Host 回归可重复，不发布 Marketplace 或 npm。

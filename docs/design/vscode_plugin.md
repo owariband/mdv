@@ -41,7 +41,7 @@ mdv/
 │   │   ├── src/
 │   │   ├── test/
 │   │   └── README.md
-│   └── mdv_agent_tool/          # 仅计划，尚未创建；见配套方案
+│   └── mdv_agent_tool/          # 独立成对读取/仅 Doc 保存工具；见配套方案
 └── docs/design/
     ├── vscode_plugin.md
     └── agent_tool.md
@@ -221,7 +221,7 @@ MDV FSP 默认允许本地资源根为当前 `.mdv` 所在目录。普通链接�
 
 ## 7. Agent 协作边界
 
-Agent 工具方案在 [`agent_tool.md`](./agent_tool.md) 中单独维护。插件不读取 Agent 的内存，也不把自己的未保存 buffer 伪装成磁盘内容；Agent 只能看到已通过 Core 保存的状态。
+Agent 工具方案在 [`agent_tool.md`](./agent_tool.md) 中单独维护。2026-09-09 已在独立 adapter 实现成对读取和默认仅 Doc 保存；插件不读取 Agent 的内存，也不把自己的未保存 buffer 伪装成磁盘内容，Agent 只能看到已通过 Core 保存的状态。
 
 首版通过“保存文件 + 外部变化检测 + CAS”协作，无 IPC、HTTP 服务或跨进程共享会话。VS Code 可以展示 CLI 保存后的内容，但安装插件不会自动给每个第三方 Agent 装配工具，也不保证其默认文本编辑器支持 `mdv:` URI。
 
@@ -280,6 +280,12 @@ P0–P3 的代码与本地 VSIX 已交付，当前定位是可安装的桌面本
 - `preview.6`：活动栏直接复用 `docs/assets/mdv-icon.svg` 的猫头图标，未修改业务逻辑。TypeScript、VSIX 打包、XML 与包内资源一致性校验通过。
 - 推送前最新 `preview.6` 基础安装回归 **20 项通过**，macOS arm64 / VS Code 1.136.1 / Extension Host Node 24.18.1；覆盖重复/并发打开、后台入口、dirty/undo、版本/图片、侧栏缩放与焦点。renderer 日志扫描未发现销毁错误。本次未装可选 Markdown All in One；此前 `preview.5` 含该扩展的 21 项、Restricted Mode 与两种真实窗口 reload 检查已经通过，不能把不同测试配置混作同一次执行。
 - Core 新建空文件链路全量回归 189 项：188 通过、1 项既有 Windows 路径专用 skip。插件仍不声明未执行的其他平台、最低版本和任意第三方扩展兼容。
+
+### 8.4 Agent CLI 联合检查（2026-09-09）
+
+测试 runner 新增可选 `--agent-cli <已安装的 cli.cjs>`，同时传入实际 Node 路径。新增用例启动真实子进程，读取已提交 Ref 和当前 Doc，再保存 Doc；无未保存编辑时原生编辑器刷新，有人的未保存编辑时仍保留文本并拒绝旧基线覆盖，Ref、HEAD、版本均不变。没有修改插件生产代码或 Core。
+
+该新增用例已通过，使用仓库外安装的 `@mdv/agent-tool`，不是直接调用 Core 冒充 CLI。完整运行最新为 **20/21 通过**：原生撤销用例连续复现失败，不能宣称整套通过；另一个缩放断言经截图确认忽略了原生竖滚动条占用，已改为比较实际 viewport 可用宽度，修正后通过。撤销问题及复现路径见 [O006](./open-questions.md#o006原生撤销回归在-agent-联合检查中失败)。旧版通过记录是当时环境的结果，不覆盖本次失败。
 
 ## 9. 本地分发与后续范围
 

@@ -1,0 +1,39 @@
+{
+  "name": "@mdv/agent-tool",
+  "version": "0.1.0-preview.1",
+  "description": "Read paired MDV reference/document content and save document drafts with conflict protection",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/owariband/mdv.git",
+    "directory": "adapter/mdv_agent_tool"
+  },
+  "bin": {
+    "mdv": "dist/cli.cjs"
+  },
+  "files": [
+    "dist/cli.cjs",
+    "dist/cli.cjs.LEGAL.txt",
+    "dist/core-build.json",
+    "README.md"
+  ],
+  "scripts": {
+    "prepare:core": "node scripts/prepare-core.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "test:package": "npm run build && node scripts/test-package.mjs",
+    "package": "npm run build && npm pack --ignore-scripts --pack-destination dist"
+  },
+  "devDependencies": {
+    "@mdv/core": "file:vendor/mdv-core-0.0.0-development.tgz",
+    "@types/node": "^22.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}
