@@ -1,0 +1,7 @@
+interface:
+  display_name: "MDV"
+  short_description: "Read paired MDV content; save only document drafts"
+  default_prompt: "使用 $mdv 读取这个 .mdv 的 Reference 和正文，先不要修改。"
+
+policy:
+  allow_implicit_invocation: true

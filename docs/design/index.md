@@ -24,6 +24,8 @@ M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务�
 
 2026-09-09 U3 A0/A1 已实现：[`adapter/mdv_agent_tool/`](../../adapter/mdv_agent_tool/README.md) 提供成对读取（默认文本/可选 JSON）、历史 Doc 精确 bind 读取和仅正文保存。默认不开放 Ref/历史修改，写入必须携带旧文档身份/generation；ZIP 与 Core public API 不变。19 项 Node 20/26 子进程回归及独立安装包验证通过，CLI 不自动给宿主注册工具；此前“仅有设计”的记录被此状态更新取代。
 
+2026-09-09 Agent 成果已通过 `6e41aaa` 推送；按用户“给当前 Codex 装上工具”的要求提供可选 [`mdv` 个人 Skill](../../adapter/mdv_agent_tool/skills/mdv/SKILL.md)，从技能位置调用独立安装的 CLI。它仅负责跨项目发现和调用，不改变默认权限，也不扩展为 MCP 服务；安装实测状态见[开发日志](./dev_log.md)。
+
 ## 页面
 
 - [架构与产品设计](./architecture.md)：格式语义、领域模型、最终行为和安全边界。

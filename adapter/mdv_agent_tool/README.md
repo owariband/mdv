@@ -105,6 +105,21 @@ mdv save-document --file example.mdv --input - < request.json
 
 **这里的默认权限是工具接口的能力边界，不是文件加密或 OS 沙箱。** 如果 Agent 还拥有任意 shell/磁盘写入能力，它可以绕过这个工具改 ZIP；真正需要强制权限时，宿主必须限制其他文件工具/命令和可操作的路径。当前不会自动注册 MCP、安装 Skill、修改 Agent/VS Code 全局配置，也不宣称任意 Agent 安装插件后就会自动识别 MDV。
 
+### Codex 个人技能
+
+仓库提供 [`skills/mdv/`](https://github.com/owariband/mdv/tree/main/adapter/mdv_agent_tool/skills/mdv)，让 Codex 在遇到 `.mdv` 读取/编辑请求时选择现有 CLI；技能本身不扩展权限、不启动服务。遵循 [官方 Skills 机制](https://learn.chatgpt.com/docs/build-skills)，可显式使用 `$mdv`，也允许按请求自动匹配。
+
+先让 Codex 的 skill-installer 从 `owariband/mdv` 安装 `adapter/mdv_agent_tool/skills/mdv`，建议固定已审核的提交 SHA，安装到个人技能目录。然后将本仓库构建的 tarball 安装在**实际技能目录**的 `runtime/` 下，例如 macOS/Linux：
+
+```sh
+npm install --prefix "$HOME/.agents/skills/mdv/runtime" --ignore-scripts --omit=dev --no-audit --no-fund /absolute/path/to/mdv-agent-tool-0.1.0-preview.1.tgz
+node "$HOME/.agents/skills/mdv/runtime/node_modules/@mdv/agent-tool/dist/cli.cjs" --version
+```
+
+技能指令以自身位置定位 CLI，不依赖 MDV 仓库位置或当前工作目录。如果安装器选择了其他技能目录，替换上面的路径。这里不是 `npm install -g`，不改 shell PATH、Git 身份或 Codex 的全局配置文件。源码/构建步骤仍见本文开头，不从 registry 下载同名占位包。
+
+安装后下一轮对话可使用该技能；若宿主未刷新列表，重启 Codex。个人技能提供跨项目的发现与调用说明，不代表本轮对话新增了一个 MCP 函数，也不绕过工作区文件访问限制。
+
 ## 输出、错误和边界
 
 - `read` 默认文本，可选 JSON；save 和所有正常错误均为单个 JSON envelope。help/version 是独立文本入口，stderr 不打印正文或堆栈。

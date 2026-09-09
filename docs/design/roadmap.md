@@ -578,7 +578,7 @@ MarkText adapter 位于 `../markText`，不进入 `@mdv/core`。Muya State 不�
 
 ### U3：独立 CLI / Agent tool
 
-状态：**A0/A1 默认权限版已实现；宿主装配单独执行**
+状态：**A0/A1 默认权限版已通过 `6e41aaa` 推送；提供可选 Codex 个人 Skill，宿主安装状态单独记录**
 
 CLI 已放在 `adapter/mdv_agent_tool/`，仍是完全独立于 Core 的上游 package：
 
@@ -597,7 +597,7 @@ M6 的工程交付与跨平台 CI 验收已完成；首次 Windows 失败已修�
 
 1. U1 已交付：独立 Core tarball consumer、原生虚拟 Markdown 编辑/预览、手动与自动保存、图片 provider、commit/checkout、精确 bind、外部变化保护和本机 VSIX 安装/恢复验证；Core 生产代码与保存策略未改。
 2. 下一轮 U1 试用验收覆盖真实剪贴板/拖入、用户选定的其他 Markdown renderer、最低 VS Code 与 Windows/Linux GUI；已有 macOS 实测不外推为全平台承诺。
-3. 2026-09-09 已按用户“读取两段、默认只改正文”要求完成 Agent A0/A1；真实安装后 CLI → 插件 clean 刷新/dirty 保护用例已通过。扩展完整 UI 回归暴露的既有撤销问题单独列入 O006，不把 20/21 说成全套通过；后续先确认宿主装配和更高权限，再扩展 A2/A3。
+3. 2026-09-09 已按用户“读取两段、默认只改正文”要求完成并推送 Agent A0/A1；真实安装后 CLI → 插件 clean 刷新/dirty 保护用例已通过。按后续要求提供 Codex 个人 Skill，复用原 CLI，不新增服务或默认权限。用户当前准备迁移工作重心，A2/A3 和插件验收作为后续按需任务，不主动展开。扩展完整 UI 回归暴露的既有撤销问题仍列入 O006，不把 20/21 说成全套通过。
 4. 在真实宿主中测保存频率与历史规模；已有本机基线不等于验证了 10,000 Version / 512 MiB 上限或断电持久性。
 5. 正式公开分发前由 owner 确认 npm scope、发布权限、License 和版本策略；运行严格 release gate、最终产物与目标提交 CI，记录真实版本后再将 M6 标为正式发布完成。MarkText 排在首个客户端验证之后。
 

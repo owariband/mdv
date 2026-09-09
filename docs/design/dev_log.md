@@ -11,7 +11,17 @@
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
 
-## 2026-09-09 — Agent Tool A0/A1 默认权限版
+## 2026-09-09 — Codex MDV 技能装配
+
+- 新增 `adapter/mdv_agent_tool/skills/mdv/SKILL.md` 与发现元数据，按 `.mdv` 读写请求自动选择，也可显式调用；不触发普通 Markdown 或 Core 开发任务。
+- 技能从自身 `runtime/` 定位独立安装的 CLI，不依赖当前项目、仓库源码或全局 npm bin；不新增业务包装层、MCP 服务或写命令。
+- 明确当前/历史配对、只读请求无写入、严格旧基线、仅正文保存与冲突/不确定落盘的处理；权限继续由 CLI 执行，Skill 不替代校验。
+- 增加个人安装说明与隔离依赖路径；运行时不入库，不修改全局 Git/npm/Codex 配置。安装实测结果在完成后另行记录，不把技能源码存在等同于宿主已安装。
+
+## `6e41aaa` — `feat: add paired MDV reads and document-only Agent writes`
+
+- 完整 SHA：`6e41aaa262f819e18d035948eb3fc460ab4b24c7`
+- 已推送到 `origin/main`；本次 push 前再次运行 CLI 19 项全部通过。以下为 A0/A1 的交付明细，后续 Skill 装配单独记录。
 
 - 在 `adapter/mdv_agent_tool/` 新增独立 Node 20+ package，提供已捆绑固定 Core 的本地 CLI tarball；不向根 Core 增加 bin、运行依赖或新公开类型，不启动服务。
 - `read` 一次返回当前已保存 Ref/Doc，默认带固定标题的文本，可用 JSON 精确保留字符、换行、来源和保存基线；历史 Doc 读取精确绑定的 Ref，unbound 不拿当前 Ref 顶替。

@@ -24,7 +24,7 @@ Core 已经提供 read/save/commit/checkout/trace/status/diff/verify 和图片 A
 - 当前读取来自同一次 Core 打开的两份已保存工作副本；不创建 bind，不读取 VS Code 未保存 buffer。`--document-version <id>` 读取历史 Doc 及其精确绑定的历史 Ref，unbound 明确为 `source: null`，不使用最新 Ref 顶替。
 - `mdv save-document --file <path.mdv> --input <request.json|->` 只接受 `expectedDocumentId`、`expectedGeneration`、`markdown`；只保存 Doc 工作副本。Ref、两棵 HEAD、版本和 bind 均不改变，不自动 commit。
 - Ref 写入、commit/checkout、资源导入、create 均不开放；禁止历史写目标、额外 tree/permissions 字段和提权开关。权限校验发生在实际 CLI 入口，不只是工具描述或提示词。
-- 这是工具能力限制，不是 OS 沙箱；若 Agent 还有任意 shell/文件写权限，宿主仍须限制绕过工具的途径和路径范围。MCP、Skill 安装和宿主自动注册均未实现。
+- 这是工具能力限制，不是 OS 沙箱；若 Agent 还有任意 shell/文件写权限，宿主仍须限制绕过工具的途径和路径范围。MCP 未实现；可选 Codex 个人 Skill 通过显式安装复用现有 CLI，不由读写命令自动注册。
 - `src/cli.ts` 管参数、限量 I/O 与退出码；`commands.ts` 只调用 Core public API 并核对跨调用身份；`protocol.ts` 管必要的 JSON 类型与格式。没有修改 Core、引入服务或再造版本/锁协议。
 
 后文完整动作的 actor、commit 和图片等契约只供未来扩展参考，不能解释为默认授予 Agent 这些权限。可执行说明以 [adapter README](../../adapter/mdv_agent_tool/README.md) 为准。
@@ -40,6 +40,7 @@ adapter/mdv_agent_tool/
 ├── tsconfig.json
 ├── scripts/              # 独立 Core tarball、构建与安装验证
 ├── vendor/               # 本地 Core 产物；忽略入库
+├── skills/mdv/           # Codex 调用说明；个人安装时另装 runtime/，不入库
 ├── src/
 │   ├── cli.ts            # argv、输入读取、输出和退出码
 │   ├── commands.ts       # 输入校验、Core 调用、有限结果投影
@@ -52,6 +53,8 @@ adapter/mdv_agent_tool/
 只依赖 `@mdv/core` 的 public API，不导入插件，不引用根源码，不自己解包写 entry；不建立第二套 lock、CAS、hash 或版本图校验。代码量增长后按真实动作拆文件，不先建立 handler/service/repository 多层转调。
 
 初始可从 Core tarball 独立安装并固定构建，Node 要求不低于 Core 当前的 `>=20`；正式 npm 身份和版本仍需 owner 确认。根 Core 的构建、测试、发布与 `bin` 保持不变；没有 adapter 时 Core 仍能独立交付。
+
+2026-09-09 用户要求推送工具并给当前 Codex 安装，新增可发现的个人 [`mdv` Skill](../../adapter/mdv_agent_tool/skills/mdv/SKILL.md)。其运行时使用技能目录下独立安装的固定 CLI，换工作区不依赖本仓库路径；不增加 MCP 服务、Core 接口或新的命令面。具体安装与生效边界见 [adapter README](../../adapter/mdv_agent_tool/README.md#codex-个人技能)。
 
 ## 3. 完整命令面草案（远期，非当前权限）
 
