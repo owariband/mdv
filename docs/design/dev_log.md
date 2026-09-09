@@ -1,6 +1,6 @@
 # MDV 开发提交日志
 
-> 最后更新：2026-09-08
+> 最后更新：2026-09-09
 >
 > 本页是 Git commit message 的详细版本，按最新提交在前排列。它补充已经推送但正文过于简略的历史提交，不改写 Git 历史。
 
@@ -10,6 +10,22 @@
 - Git 中继续使用 Conventional Commit 风格的简短标题；标题后保留一个空行，再用逐项 bullet 写正文，并把同样的信息同步到本页。
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
+
+## `2d68ef6` — `feat: deliver VS Code adapter and ordinary MDV editing`
+
+- 完整 SHA：`2d68ef62d902b48b0bfc7f7e950f80a427642f46`
+- 日期：2026-09-09
+- 交付批次：U1 VS Code 本地预览版，包含历次试用修正，产物升级至 `0.1.0-preview.6`。
+- 新增独立 `adapter/mdv_vscode/`，只消费 Core package root；本地构建、tarball 校验、VSIX 安装和隔离 Extension Host 回归可重复，不发布 Marketplace 或 npm。
+- 支持文件系统普通新建的 0 字节 `.mdv`：打开不写磁盘，首次保存复用既有身份/generation 校验与原子 ZIP 发布；非空坏包、路径替换和旧保存基线继续受保护。
+- 复用原生 Markdown 编辑、预览和兼容扩展，提供图片资源代理、普通保存、显式 commit、受保护恢复和历史 Doc 精确绑定的 Ref 对照，不把渲染器或 CLI 加入 Core。
+- 取消包概览默认页面和正文 Diff，Doc 默认打开；Ref/Doc 可按需显隐，原生后台标签保留未保存文本、撤销和选区，不关闭用户其他文档。
+- 侧栏双列版本图展示完整 parent 分支、各树 HEAD、跨列 bind 和 Ref 的全部 Doc 使用方；随侧栏可用宽高重排，普通打开不抢占侧栏选择。
+- 复现并修复跨编辑组重复打开引起的 `OverlayWebview has been disposed`：resolve 先返回，Webview ready 后才跳转并释放入口，覆盖取消、后台和并发打开。
+- 活动栏换成项目已有猫头 SVG；构建包内资源和 manifest 一致，不修改正文/版本业务。
+- 本轮验证：Core 共 189 项（188 通过、1 项 Windows 专用 skip）；干净目录 tarball runtime 与 TypeScript 5.9.3/仓库编译器 consumer 通过；最新 VSIX 基础安装回归 20 项通过，renderer 日志无销毁错误。
+- 历史验证独立保留：`preview.5` 包含可选 Markdown All in One 的 21 项、Restricted Mode、无外部变化/外部冲突两种真实窗口 reload 已通过；本轮未重复所有配置。Windows/Linux GUI、最低 VS Code 和真实剪贴板完整矩阵仍待验证。
+- 未包含个人 `docs/test_mdv/test.mdv`、用户 `.gitignore` telemetry 改动或构建产物；未修改 Git 全局身份，不重写历史。独立 Agent tool 在此提交中仍只有设计，下一批按用户新要求实现成对读取和默认仅正文可写。
 
 ## `52f1d33` — `fix: align archive inputs and snapshot tests on Windows`
 
