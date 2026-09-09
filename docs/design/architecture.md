@@ -20,7 +20,7 @@ MDV（Markdown Document with Versions）是一种带版本语义的 Markdown 文
 - 每个成品版本实际依据的精确摘要版本，或明确记录该版本没有摘要依赖；
 - 随时可打开或导出的当前 Markdown 成品。
 
-本项目首先完成独立的 `@mdv/core`。它是 `.mdv` 的官方 TypeScript 参考实现，但不是格式本身的唯一事实来源。语言无关规范、一致性样例和 Schema 与 Core 同级；Core 0.1 闭环完成后，VS Code extension 作为第一个图形客户端，MarkText adapter 后续接入。
+本项目首先完成独立的 `@mdv/core`。它是 `.mdv` 的官方 TypeScript 参考实现，但不是格式本身的唯一事实来源。语言无关规范、一致性样例和 Schema 与 Core 同级。Core 工程与跨平台验收已通过，按 2026-09-08 的 [D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 规划本地 VS Code/Agent adapter 接入，不再等待 npm 正式发布；MarkText 排在首个客户端验证之后。
 
 ### 1.1 核心语义
 
@@ -121,7 +121,7 @@ Agent 在需要摘要输入的任务期间固定一个精确 Reference Version I
 
 ### 3.2 Version
 
-Document、Version ID 都是路径安全的随机不透明标识：分别使用 `d_`、`v_` 加 32 位小写十六进制字符，由密码学安全随机源产生。调用方不得从 ID 推断时间或顺序。UI 中的 `R1`、`D3` 只是按历史计算出的展示序号。
+Document、Version ID 都是路径安全的不透明标识：分别使用 `d_`、`v_` 加 32 位小写十六进制字符。Version 和 `createMdv` 的 Document ID 使用密码学安全随机源；[D015](./decisions.md#d015普通空文件是正常的新建入口) 的零字节新建入口使用文件身份摘要稳定生成 Document ID，并在首次写入时固化。调用方不得从 ID 推断时间或顺序，也不能将 ID 当成认证凭证。UI 中的 `R1`、`D3` 只是按历史计算出的展示序号。
 
 ```ts
 type DocumentId = `d_${string}`
@@ -885,12 +885,15 @@ Reader 将 `.mdv` 当作不可信归档处理：
 
 ## 12. 包与模块边界
 
-具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。项目采用单个 `@mdv/core` 包，不使用 monorepo，也不把内部职责拆成多个 npm package：
+具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。Core 仍是根目录单个 `@mdv/core` 包，不把内部职责拆成多个 npm package。同仓 `adapter/mdv_vscode/` 已交付本地预览版，Agent tool 仍在规划；不迁移 Core，也不引入 workspace：
 
 ```text
 mdv/
 ├── package.json
 ├── tsconfig.json
+├── adapter/                    # 不属于 Core 的源码或发布产物
+│   ├── mdv_vscode/             # 已实现，本地 VSIX 预览版
+│   └── mdv_agent_tool/         # 仅计划，尚未创建
 ├── docs/
 │   ├── README.md
 │   ├── getting-started.md
@@ -903,6 +906,8 @@ mdv/
 │       ├── architecture.md
 │       ├── mechanisms.md
 │       ├── roadmap.md
+│       ├── vscode_plugin.md
+│       ├── agent_tool.md
 │       ├── decisions.md
 │       ├── open-questions.md
 │       └── log.md
@@ -968,7 +973,7 @@ Agent model
 
 普通 `.md` 是单个 UTF-8 文本文件，Agent Runtime 可以直接调用文件系统 read/write/patch。`.mdv` 是带不变量的 ZIP 文档包，修改时应由工具调用 Core，不能把内部 entry 当作普通路径直接覆盖。
 
-Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚本或 MCP tool；是否采用哪种包装方式由 Agent 宿主决定，均不属于 MDV 格式或 Core 的内部层次，也不要求常驻服务。第一版不提供官方 CLI；将来出现独立的终端使用需求时，再把 CLI 作为 Core 的外部调用方单独立项。
+Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚本或 MCP tool；这些包装均不属于 MDV 格式或 Core 的内部层次，也不要求常驻服务。当前 Core 不包含 CLI；2026-09-08 已按实际终端使用需求维护独立 `adapter/mdv_agent_tool/` 的[一次性 CLI 方案](./agent_tool.md)，尚未实现。命令协议和权限装配由该上游项目负责。
 
 面向人的 Reference/Document 左右对照由宿主组合现有 bind/trace 与读取接口：Core 保证某个 Document Version 精确对应其绑定的 Reference Version（或明确未绑定），宿主再决定双栏布局、Markdown 渲染、同步滚动以及是否调用编辑器原生 Diff。M5 的结构化 Diff 更偏向 Agent/自动化消费，不要求图形客户端用它替代自身的显示能力。
 
@@ -1044,7 +1049,7 @@ Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚
 7. 已实现 M5 `getStatus`、`readContent`、源文本 Diff 与顶层 `verifyMdv`；只复用现有 Reader/Core，不改格式或写事务。
 8. 已实现 M5.5 内容寻址外部资源的导入、解析、读取与校验，不把 paste/drop 或渲染逻辑带入 Core。
 9. 完成 M6 fixtures、fuzz、安全、复杂 Markdown 往返、性能、CI、包发布与兼容承诺收口。
-10. Core 0.1 收口后启动独立 VS Code extension；首个宿主验证稳定后再接入 MarkText adapter，CLI/Agent tool 保持独立上游立项。
+10. Core 工程与跨平台验收后，用固定构建开展 `adapter/mdv_vscode/` 与 `adapter/mdv_agent_tool/` 本地接入；正式发布另行验收，首个宿主验证稳定后再接入 MarkText。两个 adapter 保持独立上游 package。
 
 第一步不是在任何编辑器的扩展名白名单中加入 `.mdv`。只有格式、fixtures 和 Core 先形成独立边界，MDV 才不会变成只能由单一编辑器理解的私有文件。
 

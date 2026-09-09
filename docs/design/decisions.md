@@ -50,6 +50,7 @@
 - 决定：`@mdv/core` 是进程内 Library，不启动服务，也不包含 CLI 层。VS Code extension 是 Core 0.1 闭环后的首个图形客户端。
 - 理由：argv、UI、Agent tool 协议与格式语义有不同发布周期。
 - 影响：上游只能调用 public API，不能直接修改 ZIP entry。
+- 后续更新：2026-09-08 的 [D013](#d013adapter-同仓独立包与本地接入优先) 调整本地接入排期和计划存放位置；“独立上游”边界继续有效，不再要求独立 Git 仓库或等待 npm 正式发布。
 
 ## D007：受管资源使用内容寻址 sidecar
 
@@ -111,3 +112,55 @@
 - 完成口径：本地检查通过、CI 配置存在、远端矩阵通过、正式发布是不同事实。未跑到的系统或断电边界不提前宣称支持；`UNLICENSED` / 开发版本 / 缺 LICENSE 阻止严格发布 gate，但不阻止日常检查。
 - 影响：本轮不选择许可证、不更改 npm/Git 全局配置、不发布 npm、不启动上游插件。正式版本、scope 权限由 owner 决定。
 - 证据：[M6 实际交付](./roadmap.md#m6一致性性能与发布收口)、[发布检查](../releasing.md)、[性能数据](../performance.md)。
+
+## D013：adapter 同仓独立包与本地接入优先
+
+- 日期：2026-09-08
+- 状态：Accepted；VS Code 本地预览版已实现，Agent tool 仍为待实现方案。
+- 方案：在仓库根规划 `adapter/mdv_vscode/` 和 `adapter/mdv_agent_tool/`，两个独立 package 分别承载 VS Code 与一次性 Agent CLI；根 package 继续是 `@mdv/core`。
+- 依赖：两个 adapter 都只消费 Core public API，互不依赖；同仓只是联调和版本管理方式，不允许 Core 反向引用 adapter，也不把它们的依赖、bin 或构建产物混入 Core 发布包。
+- 范围：先各包独立安装/构建/测试，不迁移 Core 目录、不先引入 workspace 或共享 adapter 框架；实装时以真实 Core tarball 和 VSIX/CLI 独立安装验证边界。
+- 排期：基于已验证的 Core 构建开始本地客户端和 Agent 工具接入，不等待 npm / Marketplace 正式发布；取代 D006 中先完成正式发布的排期假设，不改变 D012 的发布验收标准或 O003 的 owner 决策。
+- 交付目标：原生 Markdown 编辑与图片、Doc/Ref 精确 bind 对照、显式版本操作、外部保存后可见、未保存 buffer 不被外部改动覆盖。插件已完成本机独立安装验证；真实 Agent CLI 联合使用不在本轮完成口径中。
+- 依据：用户 2026-09-08 关于急需实际使用、维护两份方案以及 `adapter/` 目录的本轮要求；[插件方案](./vscode_plugin.md)、[Agent Tool 方案](./agent_tool.md)与[当前 Core 接口](../../src/types.ts)。
+
+## D014：VS Code 复用原生 Markdown 编辑与渲染
+
+- 日期：2026-09-08
+- 状态：Accepted / Implemented（本机预览版验收）
+- 后续修正：其中“自有包概览作为默认入口”已被 [D016](#d016doc-默认打开与侧栏控制-ref) 取代，`preview.3` 已移除概览页；原生 Markdown 与渲染复用原则继续有效。
+- 决定：Ref/Doc 通过可写 `mdv:` FileSystemProvider 暴露为原生 `markdown` 文档；默认直接使用内置 Markdown preview，保留现有 Markdown 设置、语法扩展、样式和脚本贡献。自有 CustomReadonlyEditorProvider 只展示二进制包的概览与导航，不建立正文 renderer 或另一套 dirty buffer。
+- 取代：插件初稿 §4.2 中另建 Markdown 预览 Webview 的方向，以及 §6 中另设 MDV 远程图片策略的假设；正文安全交给所选 renderer，概览自己的 CSP/命令白名单仍严格限制。旧方案被本次明确用户要求取代，不影响 Core 的资源或格式规则。
+- 资源：虚拟 Markdown 保持真实 `.mdv` 的父目录；最小 markdown-it image 扩展将本地图片转成只读代理 URI，FSP 实施目录权限与受管图片 Core hash 校验，不重写保存的 Markdown。
+- 兼容：保留 `mdv.previewCommand` 供独立 renderer 接入，但 `file:` 专属或直接读取 OS 路径的扩展不自动兼容；不为此引入可写临时镜像。历史 bind 始终读取两份精确版本，用两个内置固定预览呈现。
+- 验证：真实 macOS Extension Host、安装版 VSIX、原生预览 DOM 的图片/表格、额外 markdown-it/CSS 贡献、Markdown All in One 3.6.3 的定向编辑检查；最低 VS Code、Windows/Linux 和其他 renderer 仍单独验收。
+- 理由：满足用户“保留现有 md plugin 显示功能并复用现有渲染能力”的明确要求，让 UI、快捷键和渲染生态继续由宿主负责。没有修改 Core 生产代码、公开类型、存储格式或全量 ZIP 保存策略。
+- 证据：[插件实现与验收](./vscode_plugin.md)、[使用和构建说明](../../adapter/mdv_vscode/README.md)、[集成测试](../../adapter/mdv_vscode/test/index.ts)。
+
+## D015：普通空文件是正常的新建入口
+
+- 日期：2026-09-08
+- 状态：Accepted / Implemented；用户明确否定“必须使用专用命令创建”的设计，要求对标普通 `.md` 使用体验。
+- 决定：文件系统/资源管理器新建的零字节 `.mdv` 是受支持的新文档入口；无需初始化命令或确认。`openMdv` 只读返回两份空正文、generation 0、零 Head/Version，首次 save 才原子写出完整 ZIP。插件打开时直接进入 Doc 的原生 Markdown 编辑区；专用 New Document 仅保留为可选快捷方式。
+- 边界：Core 在现有 Archive 读取接口上提供空文件视图，事务重开也使用同一规则；不复制另一套正文 buffer、不在插件拼 ZIP、不新增公开 API 或 DTO。非空损坏文件仍严格失败，不按空文档覆盖。`parseMdv` / `verifyMdv` 仍检查已序列化容器，插件将空文件的 verify 解释为“尚无已保存归档”，不阻断正常编辑。
+- 身份：空文件没有持久 manifest。用规范路径、dev/ino、birthtime/mtime/ctime 的 SHA-256 截断摘要生成不透明 Document ID，使同一个未变化空文件跨打开/进程/窗口恢复具有同一身份；首次写入保留该 ID。此为零字节入口的特例，Format §4 补记该派生方式；`createMdv` 与 Version ID 的随机生成不变。保存前移动/复制占位文件不保证保留身份，ID 也不是认证凭证。
+- 安全：首次保存继续锁内核对 documentId/generation，发布前核对文件身份并原子替换；空文件被替换、已保存包被截断、外部 writer 获胜时不能继承旧基线。打开和取消编辑不写磁盘；图片导入仍只写 sidecar，首次正文保存后引用继续有效。
+- 取代：撤回上一轮排查中“空 `.mdv` 属于错误新建方式、需要初始化确认”的建议；这是产品入口缺陷，不是用户使用错误。已保存容器的条目布局、bind、版本和普通 save/commit 分离语义不变。
+- 证据：[新建空文件与首次保存回归](../../test/write-api.test.mjs)、[事务并发/发布保护](../../test/transaction.test.mjs)、[真实插件入口测试](../../adapter/mdv_vscode/test/index.ts)、[容器规范 §1.1](../../spec/format-0.1.md#11-new-empty-files)。
+
+## D016：Doc 默认打开与侧栏控制 Ref
+
+- 日期：2026-09-08
+- 状态：Accepted / Implemented（`0.1.0-preview.3`，本机独立 VSIX 验收）。
+- 来源：用户先否定 `test.mdv` 包概览页，要求类似 Git Diff 的成对编辑布局；随后明确不要红绿差异，因为 Ref/Doc 差异本来就很大，并要求像 Git 一样的左侧树导航、很小的显示/隐藏按钮、Doc 默认必须打开。
+- 最新澄清：用户以 Git 提交图截图明确“tree”指版本演进图，不是 Doc/Ref 文件导航列表；侧栏需要 Ref/Doc 双列版本图，并展示当前或选定 Ref 版本被哪些 Doc 版本使用。正文双栏与侧栏双列版本图是两个独立概念。
+- 决定：普通新建与已有 `.mdv` 都默认直接打开 Doc 原生 Markdown 正文；Ref 从侧栏的小型显隐按钮按需显示为左栏，与右侧 Doc 并排。移除概览页，不调用原生 Diff 来承担日常写作，不通过更改全局颜色或 Markdown/Diff 设置掩盖差异效果。保留原生编辑、预览与兼容扩展。
+- 侧栏版本图：同一 `.mdv` 内左列 Reference Versions、右列 Document Versions；各列按真实 `parent` 画演进/分叉，跨列以独立线型表示 Doc → Ref bind。分别标记两棵树的 HEAD；版本短 ID、摘要和选中状态用于定位，不把 Ref/Doc 同一行视为一一对应。支持一个 Ref 被多个 Doc 版本引用，unbound Doc 不连虚假的 Ref。
+- 关联交互：选 Ref 后高亮其全部使用方及绑定连线，显示 Doc 版本数；选 Doc 后定位它绑定的精确 Ref。图默认选择 Ref HEAD，无 Ref HEAD 时选择 Doc HEAD；“Doc HEAD 实际绑定的 Ref”在页脚单独标注，不能混同。Ref 工作副本若有未提交修改，其 HEAD 使用方也不等于已采用新草稿的 Doc；无 Ref HEAD 时不能伪造可绑定版本。
+- 数据复用：`listVersions({ tree })` / `parent` / `getChildren` 提供完整版本与分支；不能只用 `getHistory(HEAD)`，否则遗漏其他分支。`listDocumentsUsingReference(refVersion)` 与 `traceReference(...).usedByDocuments` 已提供反查。磁盘仍只存 Doc Version 的 `referenceVersion`，Ref 不新增冗余 bind 字段，也不扩展成跨 `.mdv` 的全局引用索引。
+- 展示实现：上一轮建议的普通 Tree View 文件列表被本次澄清取代。双列节点/跨列连线采用侧栏 `WebviewView + SVG`，沿用 VS Code 主题；它只绘制版本关系和必要小操作，不渲染/编辑 Markdown、不替代正文 buffer、不恢复包概览页。消息限定到当前包 URI/documentId 和已验证版本，使用严格 CSP、文本 DOM 与命令白名单。图按快照缓存 metadata/状态，目前不做图虚拟化，大型历史 UI 性能单独验收。
+- 显隐实现：默认 Doc 单栏，展开 Ref 后允许临时隐藏任意一侧，至少保留一侧，另一侧仍可从侧栏恢复。隐藏将原生标签移到另一侧编辑组后台，不关闭模型，不调用 save、commit、checkout 或丢弃；原生未保存 buffer、撤销、选区与旧保存基线保留。用户启用的 VS Code auto-save 仍按宿主规则生效，不由插件更改。
+- 布局边界：正文使用原生 Markdown 编辑组，由侧栏和稳定来源 URI 管理同一 `.mdv` 的配对。此前“必须合成为同一个标签、共同关闭”是助手的推断，非实现契约；版本图的两列不等于正文使用一个合成标签。不得为了整理 MDV 布局关闭其他文件、全局重排用户编辑区或额外复制正文模型。
+- 数据边界：可编辑两侧均为当前工作副本，并排不产生永久 bind；历史 Version 仍不可变，历史 bind 仍指向精确 Ref Version。Core 的保存、冲突、图片和容器规则不改，侧栏显隐属于宿主状态，不写入 MDV manifest。
+- 本机验收：19 项安装版集成检查通过，覆盖双列版本/分叉/独立 HEAD、反查全部 Doc、精确 Ref、多对一/unbound、草稿状态、只读历史、普通新建/已有包直接打开、显隐不丢正文/选区/undo/基线、多包图切换与无关标签保留。隐藏旧草稿在外部写入后仍拒绝保存；真实窗口 reload 后 Doc 和隐藏 Ref 均恢复，无外部变化可保存，外部 writer 获胜则阻止旧基线覆盖；Restricted Mode 只读检查通过。平台与大型图未验证范围见插件方案 §8.2。
+- 证据：[公开版本/反向引用 API](../../src/types.ts)、[public 查询实现](../../src/mdv-document.ts)、[侧栏实现](../../adapter/mdv_vscode/src/version-view.ts)、[版本拓扑与分支](../../adapter/mdv_vscode/src/version-graph.ts)、[原生编辑命令](../../adapter/mdv_vscode/src/commands.ts)、[安装回归](../../adapter/mdv_vscode/test/index.ts)、[侧栏 Webview 官方能力](https://code.visualstudio.com/api/extension-guides/webview)、[原生移动编辑器命令](https://code.visualstudio.com/api/references/commands)。本次展示开发没有修改 Core 生产代码或格式。

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import {
   copyFile,
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   unlink,
@@ -13,10 +15,11 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
+import { promisify } from 'node:util'
 
 import { openArchiveFromPath } from '../dist/archive/reader.js'
 import { writeArchive } from '../dist/archive/writer.js'
-import { createMdv, MdvError, openMdv } from '../dist/index.js'
+import { createMdv, MdvError, openMdv, parseMdv, verifyMdv } from '../dist/index.js'
 
 const FIXTURE_PATH = resolve('fixtures/valid/bound-history.mdv')
 const R1 = `v_${'1'.repeat(32)}`
@@ -24,6 +27,93 @@ const R2 = `v_${'2'.repeat(32)}`
 const R3 = `v_${'3'.repeat(32)}`
 const D1 = `v_${'a'.repeat(32)}`
 const D2 = `v_${'b'.repeat(32)}`
+
+test('opens a filesystem-created empty document without writing and saves either tree normally', async (t) => {
+  const directory = await temporaryDirectory(t)
+  for (const tree of ['reference', 'document']) {
+    const packagePath = join(directory, `${tree}.mdv`)
+    await writeFile(packagePath, '')
+    const document = await openMdv(packagePath)
+    assert.equal(document.manifest.generation, 0)
+    assert.deepEqual(document.listVersions(), [])
+    assert.equal(await document.readReferenceText(), '')
+    assert.equal(await document.readDocumentText(), '')
+    assert.equal((await readFile(packagePath)).length, 0)
+    const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+      'import {openMdv} from "./dist/index.js"; console.log((await openMdv(process.argv[1])).manifest.documentId)', packagePath])
+    assert.equal(stdout.trim(), document.manifest.documentId)
+    const saved = await document[tree === 'reference' ? 'saveReference' : 'saveDocument']({
+      markdown: '# First edit\r\n', expectedGeneration: 0,
+    })
+    assert.equal(saved.manifest.documentId, document.manifest.documentId)
+    assert.equal(saved.manifest.generation, 1)
+    assert.equal(saved.listVersions().length, 0)
+    assert.equal((await readFile(packagePath)).subarray(0, 2).toString(), 'PK')
+    assert.equal((await verifyMdv(packagePath, { mode: 'full' })).valid, true)
+    const reopened = await openMdv(packagePath)
+    assert.equal(await reopened[tree === 'reference' ? 'readReferenceText' : 'readDocumentText'](), '# First edit\r\n')
+  }
+})
+
+test('explicit first commits on empty filesystem documents still create versions', async (t) => {
+  const directory = await temporaryDirectory(t)
+  for (const tree of ['reference', 'document']) {
+    const packagePath = join(directory, `${tree}.mdv`)
+    await writeFile(packagePath, '')
+    const document = await openMdv(packagePath)
+    const input = { expectedGeneration: 0, summary: 'Explicit empty version', actor: { type: 'human' } }
+    const result = tree === 'reference' ? await document.commitReference(input)
+      : await document.commitDocument({ ...input, referenceVersion: null })
+    assert.equal(result.created, true)
+    assert.equal(result.document.manifest.documentId, document.manifest.documentId)
+    assert.equal(result.document.listVersions().length, 1)
+    assert.equal((await verifyMdv(packagePath, { mode: 'full' })).valid, true)
+  }
+})
+
+test('empty documents can import images before their first Markdown save', async (t) => {
+  const directory = await temporaryDirectory(t)
+  const packagePath = join(directory, 'image.mdv')
+  await writeFile(packagePath, '')
+  const document = await openMdv(packagePath)
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6vZkAAAAASUVORK5CYII=', 'base64')
+  const resource = await document.importManagedResource({ bytes: png })
+  assert.equal((await readFile(packagePath)).length, 0)
+  const saved = await document.saveDocument({ markdown: `![image](${resource})`, expectedGeneration: 0 })
+  assert.deepEqual(Buffer.from((await saved.readManagedResource(resource)).bytes), png)
+})
+
+test('nonempty invalid files and raw empty archives remain strict and are never initialized', async (t) => {
+  const directory = await temporaryDirectory(t)
+  const packagePath = join(directory, 'invalid.mdv')
+  for (const original of [Buffer.from(' '), Buffer.from('# plain Markdown'), Buffer.from('PK')]) {
+    await writeFile(packagePath, original)
+    await assert.rejects(openMdv(packagePath), (error) => isMdvError(error, 'INVALID_ARCHIVE'))
+    assert.deepEqual(await readFile(packagePath), original)
+  }
+  await assert.rejects(parseMdv(new Uint8Array()), (error) => isMdvError(error, 'INVALID_ARCHIVE'))
+  await writeFile(packagePath, '')
+  assert.equal((await verifyMdv(packagePath)).valid, false)
+})
+
+test('replacing an empty document or truncating a saved document cannot inherit its old save baseline', async (t) => {
+  const directory = await temporaryDirectory(t)
+  const packagePath = join(directory, 'replaced.mdv')
+  await writeFile(packagePath, '')
+  const original = await openMdv(packagePath)
+  const incoming = join(directory, 'incoming.mdv')
+  await writeFile(incoming, '')
+  await rename(incoming, packagePath)
+  await assert.rejects(original.saveDocument({ markdown: 'stale', expectedGeneration: 0 }),
+    (error) => isMdvError(error, 'CONFLICT'))
+  assert.equal((await readFile(packagePath)).length, 0)
+  const next = await openMdv(packagePath)
+  const saved = await next.saveDocument({ markdown: 'saved', expectedGeneration: 0 })
+  await writeFile(packagePath, '')
+  await assert.rejects(saved.saveDocument({ markdown: 'must not overwrite', expectedGeneration: 1 }),
+    (error) => isMdvError(error, 'CONFLICT'))
+  assert.equal((await readFile(packagePath)).length, 0)
+})
 
 test('creates a path-bound generation-zero document', async (t) => {
   const directory = await temporaryDirectory(t)

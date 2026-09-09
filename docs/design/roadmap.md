@@ -2,9 +2,9 @@
 
 > 最后更新：2026-09-08
 >
-> 当前里程碑：M6 工程硬化已实现，本地与远端 10 组 CI 均通过；发布身份/License 与正式发布待验收
+> 当前里程碑：M6 工程硬化与跨平台 CI 已通过，正式发布待验收；U1 已交付本地 VSIX 预览版并完成本机安装验证，U3 仍为待实现设计
 >
-> 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件
+> 范围：`@mdv/core` 的实现进度、阶段依赖和验收条件，以及独立上游 adapter 的接入计划
 >
 > 维护者入口：[`index.md`](./index.md)；调用方文档：[`docs/README.md`](../README.md)
 
@@ -29,7 +29,7 @@
 - **进行中**：已有可验证交付，但该阶段仍有明确验收项未关闭；
 - **下一步**：当前最高优先级，前置条件已经满足；
 - **未开始**：可以有设计稿或类型草案，但还没有形成可用实现；
-- **上游等待**：不属于本仓库，等待所依赖的 Core 能力稳定后再接入。
+- **上游等待**：不属于 Core package，等待所依赖的 Core 或首个客户端验证后再接入；是否同仓存放不改变依赖方向。
 
 内部函数存在不等于公开能力完成。例如 `archive/reader.ts` 能读取包，但在调用方还不能从 `@mdv/core` 包根导入 `openMdv` 时，仍不能把它记作“外部已经可以使用”。
 
@@ -45,9 +45,9 @@
 | M5 Agent-friendly 审阅与诊断 | 完成 | 结构化 status、统一 `ContentSpec`、bounded line Diff、metadata/full `verifyMdv` 与 package-root 测试 | 默认限制与诊断边界已记录；后续稳定兼容承诺留到 M6 |
 | M5.5 受管资源 sidecar | 完成 | 四个 `ManagedResource` API、located 只读快照、hash 校验、不覆盖原子发布与资源闭环测试 | POSIX/Windows 支持矩阵与长期兼容承诺留到 M6 |
 | M6 稳定发布 | 进行中 | 可重复 fixtures、有界 fuzz、复杂 Markdown 回归、干净源码 tarball/TS consumer、基准、10 组 CI 通过与 release gate | npm scope/License/版本选择和实际发布待完成 |
-| U1 VS Code extension | 上游等待 | 已确定为第一个落地客户端；bind + 内容读取与图片 sidecar 已可用，具体 mode 属于 extension | 等待 M6 形成 Core 0.1 稳定发布闭环 |
+| U1 VS Code extension | 本地预览版 | `adapter/mdv_vscode/` 已实现；原生 Markdown 编辑/预览、版本/bind、图片与冲突保护；本机安装回归通过 | 最低版本、Windows/Linux GUI、剪贴板矩阵、其他 renderer 与正式分发待验收 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
-| U3 独立 CLI / Agent tool | 上游等待 | 边界已确定为 Core 上游，M4/M5/M5.5 public API 已可用 | 等待 M6 错误码、诊断码兼容承诺稳定 |
+| U3 独立 CLI / Agent tool | 下一步，与 U1 联调 | 开发方案已记录，规划于 `adapter/mdv_agent_tool/`；一次性 CLI | 尚无命令实现；需协议、身份/generation 保护、安装与真实 Agent 验收 |
 
 核心开发依赖顺序为：
 
@@ -67,7 +67,8 @@ M4 完成 -> Core 具备显式版本与 trace 闭环
 M5 完成 -> Core 具备面向 Agent/自动化的结构化检查与归档诊断能力
 M5.5 完成 -> Core 具备 Markdown 图片受管 sidecar 闭环
 M6 完成 -> Core 0.1 达到稳定发布口径
-Core 0.1 稳定发布 -> 启动独立 VS Code extension，MarkText adapter 后续接入
+M6 工程/跨平台验收通过 -> U1/U3 固定 Core 构建，先交付本地 VSIX + CLI
+Core 正式发布与授权确认 -> 独立公开分发；首个客户端验证后再接入 MarkText
 ```
 
 ## 3. 已完成阶段
@@ -555,11 +556,15 @@ M6 完成后，可以称 `@mdv/core 0.1` 为本轮设计范围内的完整形态
 
 ### U1：VS Code extension
 
-状态：**等待 Core 0.1 闭环**
+状态：**本地预览版已交付；跨平台与正式分发待验收**
 
-VS Code extension 是计划中的第一个图形客户端，但作为独立上游项目，不进入 `@mdv/core`。M5.5 已完成，当前优先完成 M6，不在 Core 发布承诺尚未闭环时并行维护客户端兼容层。
+VS Code extension 已在 `adapter/mdv_vscode/` 作为独立 package 实现，不进入 `@mdv/core`。首版 `0.1.0-preview.1` VSIX 自带固定 Core 构建；按用户要求直接复用内置 Markdown 编辑与渲染链路，给独立 renderer 留 `mdv.previewCommand` 出口，不做第二套正文 renderer。使用说明见[adapter README](../../adapter/mdv_vscode/README.md)，详细验收与平台边界见[插件方案 §8](./vscode_plugin.md#8-开发阶段与验收)，这不把 M6 提前标成正式发布完成。
 
-未来接入遵守三个边界：
+后续 `0.1.0-preview.2` 修复用户实测发现的普通新建空文件入口：0 字节 `.mdv` 可直接打开编辑，首次保存才生成 ZIP。为避免 adapter 复制存储协议，Core 的 `openMdv` 和事务重开增加空文件视图；公开 API 形状、已有 ZIP 布局及 save/commit 语义不变，详见 [D015](./decisions.md#d015普通空文件是正常的新建入口)。
+
+`0.1.0-preview.3` 落地 [D016](./decisions.md#d016doc-默认打开与侧栏控制-ref)：取消概览默认页，普通新建/已有包直接打开原生 Doc，Ref/Doc 可以显隐；侧栏双列版本图展示完整 parent 分支、独立 HEAD、Doc → Ref bind，并从选定 Ref 高亮全部 Doc 版本使用方。复用既有 Core 查询和 FSP 保存，隐藏以后台原生标签保留草稿/undo/基线。19 项本机安装回归及隐藏草稿真实 reload、外部冲突、Restricted Mode 检查通过；大型图性能、Windows/Linux GUI、最低 VS Code 运行时和任意第三方 renderer 仍需单独验收。
+
+实现遵守三个边界：
 
 1. extension 只依赖 `@mdv/core` package root，不读取或修改 ZIP entry；
 2. extension 根据 Document Version 的精确 bind 分别读取 Reference/Document，并通过虚拟 Markdown 文档实现左右对照；两者共享 `.mdv` 所在目录作为资源基准；
@@ -573,9 +578,9 @@ MarkText adapter 位于 `../markText`，不进入 `@mdv/core`。Muya State 不�
 
 ### U3：独立 CLI / Agent tool
 
-状态：**等待 Core 0.1 闭环**
+状态：**下一步：设计已记录，与 U1 联调**
 
-CLI 是完全独立的上游业务项目：
+CLI 计划放在 `adapter/mdv_agent_tool/`，仍是完全独立于 Core 的上游 package：
 
 - 只依赖 `@mdv/core` package root；
 - 将 argv、stdin、stdout、JSON envelope 和退出码映射到 Core public API；
@@ -584,15 +589,17 @@ CLI 是完全独立的上游业务项目：
 - 不直接解包修改 entry，也不复制 Core 的版本规则；
 - 不要求 Core 启动服务或常驻进程。
 
-CLI 的具体命令设计不阻塞 Core，也不在本仓库提前冻结。
+CLI 命令、JSON 协议、跨调用 documentId/generation 和 A0–A3 验收在 [Agent Tool 方案](./agent_tool.md)中单独维护，均为待实现设计；不进入 Core public model，也不要求插件通过 CLI 执行自己的保存。
 
 ## 6. 下一批开发任务
 
-M6 的工程交付与跨平台 CI 验收已完成；首次 Windows 失败已修复并在 `52f1d33` 的 10 组矩阵中通过，证据及 skip 原因已记录。仍不同时启动 VS Code、MarkText 或 CLI，剩余验收按顺序执行：
+M6 的工程交付与跨平台 CI 验收已完成；首次 Windows 失败已修复并在 `52f1d33` 的 10 组矩阵中通过，证据及 skip 原因已记录。2026-09-08 按用户实际使用需求调整排期，先推进本地 adapter，正式发布继续单独验收：
 
-1. 结合目标宿主确认可接受的保存频率与历史规模；已有本机基线，不宣称验证了 10,000 Version / 512 MiB 上限或断电持久性。
-2. owner 确认 npm scope、发布权限、License 和版本策略；补 LICENSE 和 package/lock 身份，然后运行严格 release gate、最终 tarball 检查并确认待发布提交的 CI，再执行正式发布流程。
-3. 记录真实提交和发布版本，再将 M6 标记完成、进入独立 VS Code 客户端阶段。
+1. U1 已交付：独立 Core tarball consumer、原生虚拟 Markdown 编辑/预览、手动与自动保存、图片 provider、commit/checkout、精确 bind、外部变化保护和本机 VSIX 安装/恢复验证；Core 生产代码与保存策略未改。
+2. 下一轮 U1 试用验收覆盖真实剪贴板/拖入、用户选定的其他 Markdown renderer、最低 VS Code 与 Windows/Linux GUI；已有 macOS 实测不外推为全平台承诺。
+3. 经用户确认后按 A0–A3 实现独立 Agent tool，再进行真实 Agent 保存 → 插件刷新/冲突的联合验收；当前插件测试中的外部 writer 是 Core 调用，不冒充已交付 CLI。
+4. 在真实宿主中测保存频率与历史规模；已有本机基线不等于验证了 10,000 Version / 512 MiB 上限或断电持久性。
+5. 正式公开分发前由 owner 确认 npm scope、发布权限、License 和版本策略；运行严格 release gate、最终产物与目标提交 CI，记录真实版本后再将 M6 标为正式发布完成。MarkText 排在首个客户端验证之后。
 
 资源 sidecar 与 `.mdv` 整包替换继续保持独立事务；M6 不改变“先导入可复用 hash 资源，再 save Markdown 引用”的顺序，也不新增增量容器或存储框架。
 
@@ -604,7 +611,7 @@ M5 与 M5.5 已关闭 Agent-friendly 检查和产品资源能力；剩余 M6 关
 - **M5.5 完成**：本轮产品能力闭环。Core 能安全导入、解析、读取和验证图片 hash sidecar，但仍是待硬化的预发布实现；
 - **M6 完成**：Core 0.1 稳定发布闭环。受支持平台、性能边界、错误/诊断码、package 产物和兼容策略都有自动化证据，此时才称本轮 `@mdv/core` 为完整形态。
 
-U1/U2/U3 不属于 Core 完成口径。M6 完成后它们可以只依赖 package root 开发，不需要等待 Core 仓库再增加 VS Code、Muya、CLI 或 Agent Runtime 类型。
+U1/U2/U3 不属于 Core 完成口径。U1/U3 已具备固定 Core 构建开展本地接入的前提，不必等待正式 npm 发布；同仓 adapter 不会让 Core 增加 VS Code、Muya、CLI 或 Agent Runtime 类型，也不能用客户端演示代替 Core 发布验收。
 
 ## 8. 暂不进入 0.1 的工作
 

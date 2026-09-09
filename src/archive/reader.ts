@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
+import type { BigIntStats } from 'node:fs'
 import {
   close as closeFileDescriptor,
   fstat as statFileDescriptor,
   open as openFileDescriptor,
   read as readFileDescriptor,
 } from 'node:fs'
+import { lstat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 
@@ -14,6 +16,7 @@ import {
   decodeDocumentVersionValue,
   decodeManifestValue,
   decodeReferenceVersionValue,
+  encodeManifestValue,
   FormatDecodeError,
 } from './codec.js'
 import type { FormatWarning } from './codec.js'
@@ -149,6 +152,52 @@ export async function openArchiveFromPath(
   options: ArchiveReadOptions = {},
 ): Promise<OpenedArchive> {
   return openArchive({ kind: 'path', path: resolve(path) }, resolveReadLimits(options.limits))
+}
+
+/** A filesystem-created empty file is a new document; reading it never writes a ZIP. */
+export async function openDocumentArchiveFromPath(
+  path: string,
+  options: ArchiveReadOptions = {},
+): Promise<OpenedArchive> {
+  const limits = resolveReadLimits(options.limits)
+  const source: PathSource = { kind: 'path', path: resolve(path) }
+  let stats: BigIntStats
+  try {
+    stats = await lstat(source.path, { bigint: true })
+  } catch (cause) {
+    throw mapArchiveOpenError(source, cause)
+  }
+  if (!stats.isFile() || stats.size !== 0n) {
+    return openArchive(source, limits)
+  }
+
+  // Stable across processes/reloads until the first write persists this identity.
+  // Replacing or changing the empty file must not inherit an old editor's baseline.
+  const identity = createHash('sha256').update([
+    'mdv-empty-v1', source.path, stats.dev, stats.ino,
+    stats.birthtimeNs, stats.mtimeNs, stats.ctimeNs,
+  ].join('\0')).digest('hex').slice(0, 32)
+  const manifest: ManifestFileDto = Object.freeze({
+    format: 'mdv', formatVersion: '0.1', documentId: `d_${identity}`,
+    generation: 0, markdownProfile: 'gfm',
+  })
+  return Object.freeze({
+    manifest,
+    referenceHead: null,
+    documentHead: null,
+    referenceVersions: Object.freeze([]),
+    documentVersions: Object.freeze([]),
+    versionEntries: Object.freeze([]),
+    warnings: Object.freeze([]),
+    async readManifestBytes() { return encodeManifestValue(manifest) },
+    async readWorkingCopy() { return new Uint8Array() },
+    async readVersionContent() {
+      throw new ArchiveError('NOT_FOUND', 'A new empty document has no historical versions')
+    },
+    async *readVersionContents() {},
+    async verifyVersionContents() { return { complete: true, errors: [] } },
+    async close() {},
+  })
 }
 
 export async function openArchiveForVerificationFromPath(

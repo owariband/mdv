@@ -1,0 +1,5 @@
+{
+  "name": "mdv-markdown-contribution-test", "publisher": "mdv-test", "version": "0.0.1",
+  "engines": { "vscode": "^1.100.0" }, "main": "./extension.cjs",
+  "contributes": { "markdown.markdownItPlugins": true, "markdown.previewStyles": ["./preview.css"] }
+}

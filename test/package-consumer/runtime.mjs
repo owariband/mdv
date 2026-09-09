@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as api from '@mdv/core'
@@ -11,6 +11,14 @@ assert.equal(api.MDV_FORMAT_VERSION, '0.1')
 await assert.rejects(import('@mdv/core/dist/archive/reader.js'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' })
 const directory = await realpath(await mkdtemp(join(tmpdir(), 'mdv consumer 中文 ')))
 try {
+  const emptyPath = join(directory, 'ordinary-new-file.mdv')
+  await writeFile(emptyPath, '')
+  const empty = await api.openMdv(emptyPath)
+  assert.equal((await readFile(emptyPath)).length, 0)
+  const firstSave = await empty.saveDocument({ markdown: '# First edit', expectedGeneration: 0 })
+  assert.equal(firstSave.listVersions().length, 0)
+  assert.equal(firstSave.manifest.documentId, empty.manifest.documentId)
+  assert.equal((await api.verifyMdv(emptyPath, { mode: 'full' })).valid, true)
   const path = join(directory, 'notes with spaces.mdv')
   let document = await api.createMdv(path)
   document = await document.saveReference({ markdown: '# 要求\r\n', expectedGeneration: 0 })

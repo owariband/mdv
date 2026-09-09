@@ -31,6 +31,10 @@ function openMdv(path: string, options?: OpenOptions): Promise<MdvDocument>
 
 从文件系统路径打开 MDV。返回值的 `packagePath` 是绝对路径，`baseDirectory` 是其父目录。
 
+已有的 **0 字节普通文件**按新文档打开：两份正文为空、generation 0、零 Head/Version。打开不修改文件；首次 `saveReference` / `saveDocument` 才写出完整 ZIP，generation 变为 1，仍不创建 Version；显式空 commit 则按通常规则创建版本。首次保存前也可导入图片。
+
+未保存空文件的 Document ID 由规范路径与文件身份/修改信息导出，支持独立打开和宿主恢复；首次写入后以 manifest 中的 ID 为准。它在首次保存前不保证跨移动/复制稳定。非空坏包、普通 Markdown 改后缀、目录和 symlink 不因此获得空文件回退。缺失路径仍返回 `NOT_FOUND`。
+
 ### `createMdv(path, options?)`
 
 ```ts
@@ -54,6 +58,8 @@ function parseMdv(
 ```
 
 从内存字节解析只读快照。输入会被复制；后续修改原始数组不会改变快照。`packagePath` 为 `null`，`baseDirectory` 来自可选参数并被解析为绝对路径，未提供时为 `null`。
+
+这是对已序列化容器的严格解析；空字节数组仍为 `INVALID_ARCHIVE`。`verifyMdv` 同样检查已保存的容器，零字节新文件在第一次写出 ZIP 前没有可验证的归档；不要把该诊断用作编辑器拒绝新建空文档的理由。
 
 ```ts
 interface OpenOptions {

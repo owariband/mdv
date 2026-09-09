@@ -26,6 +26,8 @@
 12. Public `interface` 只描述调用方实际消费的对象契约；泛型只在能保留真实类型关系或复用同一校验逻辑时使用，不把“库”设计成多层通用框架。
 13. 普通编辑沿用 Markdown 的既有模型：宿主拥有内存 buffer，Core 只持久化 `current.md`。不引入 `DraftVersion`、`workspace`、pending bind 或另一套草稿状态机。
 
+2026-09-08 更新：独立上游不要求独立 Git 仓库；`adapter/mdv_vscode/` 已交付本地预览 VSIX，`adapter/mdv_agent_tool/` 仍仅有方案，均只依赖 Core package root。本地接入先于正式发布；插件复用原生 Markdown 编辑/渲染，不增加 Core renderer。见[插件方案](./vscode_plugin.md)、[工具方案](./agent_tool.md)、[D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 与 [D014](./decisions.md#d014vs-code-复用原生-markdown-编辑与渲染)。
+
 ## 2. 责任边界
 
 ### 2.1 Core 负责
@@ -171,7 +173,7 @@ M5.5 的 `resource/model.ts` / `resource/store.ts` 分别承载图片的确定�
 
 ### 3.4 独立 CLI 上游项目
 
-独立的 `mdv-cli` 项目负责：
+计划中的 `adapter/mdv_agent_tool/` 独立包负责（此前统称 `mdv-cli`）：
 
 - 把 argv、stdin 和文件输入转换成 public API 参数；
 - 调用从 `index.ts` 导出的 API；
@@ -182,12 +184,15 @@ CLI 不校验版本图、不拼 ZIP entry、不直接获得锁，也不复制 sa
 
 ## 4. 项目目录
 
-当前仓库只有一个发布单元 `@mdv/core`，不使用 workspace 或 `packages/` 多包结构，只暴露 Library API。CLI 位于独立上游项目，不进入本仓库目录。
+当前有根 `@mdv/core` 与独立的 `adapter/mdv_vscode/` 本地预览包，`adapter/mdv_agent_tool/` 尚未实现。不把 adapter 放入 Core `src/` 或发布产物；各自安装/构建/测试，不使用 workspace、不迁移到 `packages/`：
 
 ```text
 mdv/
 ├── package.json
 ├── tsconfig.json
+├── adapter/                       # 独立上游包
+│   ├── mdv_vscode/                 # 已实现，本地 VSIX
+│   └── mdv_agent_tool/             # 仅计划，尚未创建
 ├── .github/workflows/ci.yml
 ├── scripts/
 │   ├── build-fixtures.mjs
@@ -284,16 +289,16 @@ mdv/
 }
 ```
 
-仓库/发布物关系为：
+仓库/产物关系为（Core 与 VSIX 已实现，Agent CLI 仍为计划；公开发布另行验收）：
 
 ```text
-mdv-core repository（当前项目）
-  -> 发布 @mdv/core
-
-mdv-cli repository（独立上游项目）
-  -> 依赖 @mdv/core
-  -> 发布 mdv CLI
-  -> 面向 Agent Runtime 与人类终端用户
+mdv repository
+  根 package @mdv/core
+    -> Core 独立构建与发布
+  adapter/mdv_vscode
+    -> 依赖 @mdv/core -> VSIX -> VS Code 用户
+  adapter/mdv_agent_tool
+    -> 依赖 @mdv/core -> CLI -> Agent Runtime / 人类终端
 ```
 
 ## 5. 模型边界：DTO、领域模型与第三方模型
@@ -961,6 +966,8 @@ type PackageMutation =
 
 ### 9.1 VS Code、MarkText 与其他 Markdown 宿主
 
+新建入口按 [D015](./decisions.md#d015普通空文件是正常的新建入口) 支持普通 0 字节文件。`openMdv` 与事务重开的 `openDocumentArchiveFromPath` 共用空白 `OpenedArchive` 视图，不新增 Draft 模型；首次保存仍通过 `createMutationEntryPlan`、Writer、全验、锁内 CAS 和原子替换。严格 archive/byte reader 与 verify 不接受空容器。空文件身份在第一次写入前由文件身份摘要稳定导出，之后读取 manifest；支持首次保存前导入图片及宿主恢复。
+
 任意宿主 adapter 的最小 Core 调用流程：
 
 ```ts
@@ -1012,11 +1019,11 @@ adapter 另外负责：
 - 把 Markdown 字符串传回 Core，而不是把宿主编辑器 State 写进 `.mdv`；
 - 用 adapter 集成测试验证 `Markdown -> editor state -> Markdown`，Core 测试不承担渲染正确性。
 
-VS Code extension 是 Core 0.1 闭环后的第一个计划客户端，使用虚拟 Markdown 文档呈现 Reference/Document；MarkText adapter 后续接入。若某个 parser 只支持 path，可以在独立 adapter 包中增加 `materializeMarkdown`；第一版 Core 不提供它，因为临时文件会引入额外的生命周期和写回语义。
+VS Code extension 已作为首个本地图形客户端实现：可写虚拟 Markdown 文档呈现工作副本、只读历史，以及直接复用内置预览和兼容 Markdown 扩展。`preview.3` 的 ZIP 文件关联只负责打开 Doc，不再显示概览；侧栏双列版本图复用 metadata 和反向引用查询，正文显隐保留原生后台标签，不另存草稿模型。真实安装、恢复基线与渲染证据见[插件方案](./vscode_plugin.md)。MarkText adapter 后续接入。若某个 parser 只支持 path，其 adapter 可另行设计 `materializeMarkdown`；当前 VS Code 插件不为兼容它维护可写临时镜像，Core 也不提供这个接口。
 
-### 9.2 独立 `mdv-cli` 的上游边界
+### 9.2 独立 Agent CLI 的上游边界
 
-CLI 的命令名、argv、stdin/stdout、JSON envelope、退出码、安装方式和 Agent tool schema 均属于独立 `mdv-cli` 项目，不在 Core 技术方案中冻结。
+CLI 的命令名、argv、stdin/stdout、JSON envelope、退出码、安装方式和 Agent tool schema 均属于独立 `adapter/mdv_agent_tool/` 包，在 [Agent Tool 方案](./agent_tool.md)中维护草案，不写入 Core 契约。
 
 Core 只保证它需要的底层能力完整且稳定：
 
@@ -1107,6 +1114,6 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 8. 已实现 M5 `readContent`、异步 status、bounded source Diff 和顶层 `verifyMdv`，完成 Agent-friendly 检查与诊断能力。
 9. 已实现 M5.5 内容寻址 sidecar 的 import/resolve/read/hash verify，完成图片资源闭环。
 10. 实现 M6 fixtures/fuzz/benchmark/CI/package/API 兼容承诺，完成 Core 0.1 发布收口。
-11. Core 0.1 验收后再启动独立 VS Code extension；MarkText adapter 与 CLI 继续作为上游独立项目。
+11. M6 工程与跨平台验收已通过，按两份 adapter 方案固定 Core 构建，先完成本地 VSIX + Agent CLI 联合使用；正式发布继续单独验收，MarkText 排在首个客户端之后。
 
 第一阶段不做 Markdown AST 抽象、不做通用 Repository、不做插件系统，也不为了 path-only 工具增加临时文件协议。先完成 Core 的可读、可写、可追踪和并发安全闭环；Agent 可装配 CLI 由独立上游项目基于 public API 实现。

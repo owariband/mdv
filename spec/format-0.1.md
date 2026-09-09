@@ -34,6 +34,19 @@ writers SHOULD omit them.
 Readers MUST reject file entries outside the grammar above. Version directories
 MUST contain exactly one `meta.json` and one `content.md`.
 
+### 1.1 New empty files
+
+An editor-facing filesystem API MAY open an existing zero-byte regular file as
+a new document with two empty working copies, generation zero and no versions.
+Opening this placeholder MUST NOT write to the file. The first save or explicit
+commit MUST publish a complete archive using the normal conflict checks and
+atomic write protocol. Nonempty invalid input MUST NOT use this fallback.
+
+The placeholder has no serialized archive yet: byte parsers and archive
+verification remain strict. The reference implementation exposes the new-file
+workflow through `openMdv`, while `parseMdv` and `verifyMdv` inspect serialized
+archives. Once written, all ordinary container requirements apply.
+
 ## 2. ZIP profile
 
 - Writers MUST produce a single-disk ZIP archive and MUST NOT emit ZIP64.
@@ -85,8 +98,15 @@ Every Version ID MUST match:
 ^v_[0-9a-f]{32}$
 ```
 
-Writers MUST generate the 16-byte hexadecimal payload from a cryptographically
-secure random source. IDs are opaque and do not encode time or ordering.
+Writers MUST generate ID payloads from a cryptographically secure random source,
+except that, for the zero-byte new-file workflow, an implementation MAY derive
+a Document ID from a collision-resistant
+digest of the canonical file identity and modification metadata, so independent
+opens and editor recovery identify the same unchanged placeholder. That ID MUST
+be persisted unchanged on the first write; a replaced or modified placeholder
+MUST NOT inherit an old save baseline. The pre-save identity is local to the
+unchanged file, not portable across moving or copying the empty placeholder.
+IDs are opaque, are not authentication credentials, and do not define ordering.
 
 Every Version ID MUST be unique across both trees in one MDV file. The version
 directory name and its `meta.json.id` MUST be identical.

@@ -54,6 +54,20 @@ save 不等于 commit。上面的两次保存不会创建历史 Version；只有
 
 ## 像普通 Markdown 一样编辑
 
+也可以先在文件系统或 VS Code 资源管理器中新建空白 `example.mdv`，再用 `openMdv` 打开，不需要先执行专用创建命令：
+
+```ts
+import { openMdv } from '@mdv/core'
+
+let document = await openMdv('/documents/example.mdv') // 已有的 0 字节文件；只读打开
+document = await document.saveDocument({
+  markdown: '# 开始写作\n',
+  expectedGeneration: document.manifest.generation,
+}) // 首次写出 ZIP；没有历史版本
+```
+
+这个入口只识别真正的空文件，不把非空 Markdown 或损坏 ZIP 自动转换/覆盖。插件打开新建空 `.mdv` 时直接进入原生 Doc 编辑区；专用 New Document 命令仍是可选快捷入口。
+
 不做版本操作时，MDV 没有额外的草稿状态机：
 
 ```text

@@ -18,7 +18,7 @@ import {
   canonicalizeTargetPath,
   fileSystemErrorCode,
 } from './lock.js'
-import { openArchiveFromPath } from './reader.js'
+import { openArchiveFromPath, openDocumentArchiveFromPath } from './reader.js'
 import type {
   ArchiveReadOptions,
   ArchiveTreeKind,
@@ -174,7 +174,7 @@ export async function runArchiveTransaction<TResult>(
       const stats = await requireRegularTarget(canonicalPath)
       targetIdentity = toTargetIdentity(stats)
       targetMode = targetIdentity.mode
-      sourceArchive = await openArchiveFromPath(canonicalPath, readOptions)
+      sourceArchive = await openDocumentArchiveFromPath(canonicalPath, readOptions)
       previousGeneration = sourceArchive.manifest.generation
       await runCheckpoint(options.hooks, 'after-reopen', context())
 

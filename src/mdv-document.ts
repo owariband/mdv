@@ -14,7 +14,7 @@ import { canonicalizeTargetPath } from './archive/lock.js'
 import { resolveReadLimits } from './archive/limits.js'
 import {
   openArchiveFromBytes,
-  openArchiveFromPath,
+  openDocumentArchiveFromPath,
   validateMarkdownBytes,
 } from './archive/reader.js'
 import type { OpenedArchive } from './archive/reader.js'
@@ -134,7 +134,7 @@ export async function openMdv(
   const readOptions = copyOpenOptions(options)
   try {
     const targetPath = await canonicalizeTargetPath(packagePath)
-    const archive = await openArchiveFromPath(targetPath, readOptions.limits === undefined
+    const archive = await openDocumentArchiveFromPath(targetPath, readOptions.limits === undefined
       ? {}
       : { limits: readOptions.limits })
     return createFileDocument(archive, packagePath, targetPath, readOptions)
@@ -686,7 +686,7 @@ class FileMdvDocument extends LocatedReadonlySnapshot<string> implements MdvDocu
     try {
       const prepared = prepareResource(this.manifest.documentId, input, maxBytes)
       const baseDirectory = await this.resourceDirectory()
-      const current = await openArchiveFromPath(this.#targetPath, this.#openOptions)
+      const current = await openDocumentArchiveFromPath(this.#targetPath, this.#openOptions)
       try {
         if (!(await lstat(this.#targetPath)).isFile()) {
           throw new MdvError('INVALID_RESOURCE', 'Resource import requires a regular MDV file', {

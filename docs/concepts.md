@@ -20,7 +20,7 @@ MDV 在 Markdown 之上增加版本与来源追踪，但不改变 Markdown 语�
 
 ## 一个容器，两份工作副本
 
-每个 `.mdv` 始终包含：
+每个已经写出容器的 `.mdv` 包含：
 
 ```text
 ref_tree/current.md    当前 Reference 工作副本
@@ -42,6 +42,8 @@ Reference 可以一直为空。此时 MDV 就退化为带显式版本能力的�
 ```
 
 新建文档从 generation 0、两份空工作副本、零版本和零 Head 开始，不会预先制造空的 R1/D1。
+
+普通文件管理器新建的 0 字节 `.mdv` 也是正常写作入口：打开时视为空白文档、磁盘不变，首次保存才建立 ZIP 容器。无需手动“初始化”，也无需先创建某个历史版本。原始非空文件不会被当成空白文档覆盖。
 
 当前 API 已提供 `createMdv`、`saveReference`、`saveDocument`、两种 commit 和两种 checkout。commit 读取已经 save 的 `current.md`，而不是接收另一份 Markdown；checkout 用历史正文替换工作副本并移动对应 Head，但不创建或删除 Version。
 

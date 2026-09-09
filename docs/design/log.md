@@ -2,7 +2,21 @@
 
 本文件只追加简短索引；具体结论写入对应设计页面。
 
+## 2026-09-09
+
+- 汇总 U1 到 `preview.6`：侧栏自适应且不抢焦点、Webview ready 后切换原生编辑器以修复销毁竞态、猫头活动栏图标。推送前 Core 188 通过/1 平台 skip，最新 VSIX 基础安装回归 20 项通过且 renderer 日志无销毁错误；此前可选 Markdown 扩展和 reload/Restricted Mode 结果分别记录。同步插件方案和索引，保留未验证的平台边界。
+
 ## 2026-09-08
+
+- 按用户确认实现 `preview.3`：移除概览页，普通打开直接进入 Doc；新增原生 Ref/Doc 显隐和侧栏双列 parent/bind 版本图。复用 Core 查询、FSP、保存基线与 Markdown renderer，隐藏通过后台原生标签保留文本/undo/选区，不创建反向 bind 或新正文模型。19 项本机独立 VSIX 集成检查通过；隐藏 Ref + Doc 的真实 reload、首次保存/外部 writer 冲突，以及 Restricted Mode 另行通过。同步 D016、插件方案、路线图、技术机制、索引和使用说明；未提交、push、发布或安装到日常 VS Code。
+
+- 用户用 Git 提交图截图澄清侧栏“tree”是 Ref/Doc 双列版本演进与 bind 图，不是文件目录。修正 D016、插件方案 §4.0、索引与路线图；区分 parent/bind、Ref HEAD/Doc 实际绑定 Ref、工作副本/历史，记录 `listDocumentsUsingReference` 等既有 API 复用与侧栏 WebviewView 绘图建议。只读 fixture 检查通过；未修改 Core/插件代码、未构建新版 VSIX。
+
+- 用户进一步确认不需要 Diff 红绿差异，要求左侧类似 Git 的树导航、小型显示/隐藏按钮与 Doc 默认打开。更新 D016 和插件方案 §4.0：Doc 为主、Ref 按需、隐藏保留原生草稿/撤销/基线；标明“合成单标签”是此前助手推断，推荐原生编辑组配对。仅维护设计，插件实现与验收待执行。
+
+- 记录用户否定包概览页、要求默认 Ref/Doc 可编辑双栏的反馈，新增 D016，并在 D014、插件方案和索引标明旧入口被取代。核对原生 Diff 双边可写及 Split in Group 边界；同标签生命周期和差异高亮待确认。本次仅更新设计记录，未更改插件实现、Core 或 VSIX，不宣称双栏修正已交付。
+
+- 根据用户实际新建空 `test.mdv` 被拒绝的反馈，确认 D015：普通新建 0 字节文件是正式支持的写作入口，不要求专用命令或初始化确认。Core 只读打开为空白视图，首次 save 复用原事务写 ZIP；插件自动进入 Doc 原生编辑区，非空坏文件仍受保护。产物升级为 `preview.2`；新增跨进程身份、首次保存/图片/空 commit、并发/替换/发布前变化和真实默认打开回归；本机 Core 188 通过/1 平台 skip、插件安装回归 16 项通过，空文件 Restricted Mode、真实 reload 后首次保存及外部冲突保护另行通过。恢复逻辑补齐激活前已还原的正文和持久化保存基线；尚未推送或跑远端矩阵。
 
 - 落地 M6 工程硬化：15 组可重复 fixtures、conformance/安全/复杂 Markdown/有界 fuzz、干净源码 tarball 与 TS consumer、六场景基准、三系统 CI 配置和 release gate。未修改生产代码或 Format 0.1。
 - 新增兼容性、性能与发布检查文档，记录 D012，并保持 O003 开放；区分本地已验证、CI 待实跑与 owner 发布决策，M6 不冒进标记为正式发布完成。
@@ -18,6 +32,9 @@
 - 将 M6 工程日志关联到已推送的真实提交 `a05b4d047fe48f983fa65303a67b7510a1bb03b4`，记录首次 GitHub Actions 运行入口；本地验证与远端结果分开记录，保留 owner 发布身份未决项。
 - 首次远端 CI 7 组 Linux/macOS 通过、3 组 Windows 失败；按实际日志修复 Reader 的目录输入分类和两项文件打开期间替换测试，不跳过 Windows 测试或修改原子发布机制，修复后重新跑矩阵。
 - 修复提交 `52f1d3383b0797a6348df5007f2696a7aa0b9ced` 已推送；[远端矩阵](https://github.com/owariband/mdv/actions/runs/34193879318) 10/10 成功，Windows 三组各 179 通过、0 失败、4 项既有平台限定 skip，所有平台的真实 tarball consumer 均通过。同步兼容性、官方文档和路线图，保留首次失败历史与 Windows 断电限制；O003 发布身份仍开放。
+- 按用户要求维护 [VS Code 插件](./vscode_plugin.md)与 [Agent Tool](./agent_tool.md)开发草案，规划仓库根 `adapter/mdv_vscode/`、`adapter/mdv_agent_tool/` 两个独立上游包；记录 D013 并同步旧排期与目录表述。本地接入不等待正式 npm 发布，但 Core 发布身份仍未决；本轮仅维护文档，没有创建 adapter 代码、安装包或新发布。
+- 随后按用户要求实现 U1 本地预览版 `adapter/mdv_vscode/`：原生 Markdown 虚拟编辑、复用内置预览/兼容扩展、图片资源代理、显式 commit/受保护 checkout、精确 bind 双栏、外部冲突与恢复基线。记录 D014，取代旧草稿中独立正文 renderer 的方向；不优化 Core 存储、不开发 Agent CLI、不提交或发布。
+- 产出 `0.1.0-preview.1` VSIX；macOS VS Code 1.136.1 / Extension Host Node 24.18.1 中 14 项安装版集成检查通过，包括实际图片/表格/CSS、Markdown All in One 3.6.3 定向编辑、自动保存与版本对话框；独立 Restricted Mode 与真实 reload 保护另行通过。最低 VS Code 1.100 下载失败，Windows/Linux、完整剪贴板和其他 renderer 仍待验收；详见[插件方案 §8](./vscode_plugin.md#8-开发阶段与验收)。
 
 ## 2026-09-07
 

@@ -24,6 +24,32 @@ import { createMdv, MdvError, openMdv } from '../dist/index.js'
 
 const CONTENT_HASH_MISMATCH = resolve('fixtures/invalid/content-hash-mismatch.mdv')
 
+test('the first save of an empty file protects concurrent writers and pre-publish changes', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const packagePath = join(directory, 'empty.mdv')
+    await writeFile(packagePath, '')
+    const first = await openMdv(packagePath)
+    const second = await openMdv(packagePath)
+    const results = await Promise.allSettled([first, second].map((document, index) =>
+      document.saveDocument({ markdown: `writer ${index}`, expectedGeneration: 0 })))
+    assert.equal(results.filter(({ status }) => status === 'fulfilled').length, 1)
+    assertMdvError(results.find(({ status }) => status === 'rejected').reason, 'CONFLICT')
+    const emptyPath = join(directory, 'changed.mdv')
+    await writeFile(emptyPath, '')
+    const empty = await openMdv(emptyPath)
+    await assert.rejects(runArchiveTransaction(emptyPath, {
+      type: 'save-working-copy', tree: 'document', markdown: Buffer.from('must not overwrite'),
+      expectedDocumentId: empty.manifest.documentId, expectedGeneration: 0,
+    }, transactionOptions({
+      async checkpoint(stage) {
+        if (stage === 'before-publish') await writeFile(emptyPath, 'external winner')
+      },
+    })), (error) => { assertArchiveError(error, 'CONFLICT'); return true })
+    assert.equal(await readFile(emptyPath, 'utf8'), 'external winner')
+    assert.deepEqual((await readdir(directory)).sort(), ['changed.mdv', 'empty.mdv'])
+  })
+})
+
 test('concurrent creates publish exactly one package and clean transaction artifacts', async () => {
   await withTemporaryDirectory(async (directory) => {
     const packagePath = join(directory, 'race.mdv')

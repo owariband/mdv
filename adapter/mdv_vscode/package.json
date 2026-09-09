@@ -1,0 +1,245 @@
+{
+  "name": "mdv-vscode",
+  "displayName": "MDV — Versioned Markdown",
+  "description": "Edit Ref/Doc, reuse Markdown previews, and trace bound document versions.",
+  "version": "0.1.0-preview.6",
+  "publisher": "mdv-local",
+  "private": true,
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owariband/mdv.git",
+    "directory": "adapter/mdv_vscode"
+  },
+  "type": "module",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onFileSystem:mdv",
+    "onCustomEditor:mdv.overview"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "MDV can be read in Restricted Mode; edits, imports and custom preview commands require trust.",
+      "restrictedConfigurations": [
+        "mdv.previewCommand",
+        "mdv.additionalResourceRoots"
+      ]
+    }
+  },
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "mdv.overview",
+        "displayName": "MDV Markdown",
+        "selector": [
+          {
+            "filenamePattern": "*.mdv"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "markdown.markdownItPlugins": true,
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mdv",
+          "title": "MDV",
+          "icon": "media/mdv-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "mdv": [
+        {
+          "type": "webview",
+          "id": "mdv.versions",
+          "name": "Versions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "mdv.create",
+        "title": "New Document…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.open",
+        "title": "Open Document…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.editReference",
+        "title": "Edit Reference",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.editDocument",
+        "title": "Edit Document",
+        "category": "MDV",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "mdv.toggleReference",
+        "title": "Show / Hide Ref",
+        "category": "MDV",
+        "icon": "$(layout-sidebar-left)"
+      },
+      {
+        "command": "mdv.toggleDocument",
+        "title": "Show / Hide Doc",
+        "category": "MDV",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "mdv.showVersions",
+        "title": "Show Version Graph",
+        "category": "MDV",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "mdv.preview",
+        "title": "Open Markdown Preview",
+        "category": "MDV",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "mdv.history",
+        "title": "Open History…",
+        "category": "MDV",
+        "icon": "$(history)"
+      },
+      {
+        "command": "mdv.showBinding",
+        "title": "Preview Bound Reference / Document…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.showBindingSources",
+        "title": "Open Bound Reference / Document Sources…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.commitReference",
+        "title": "Commit Reference…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.commitDocument",
+        "title": "Commit Document…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.checkout",
+        "title": "Restore Historical Version…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.insertImage",
+        "title": "Insert Image File…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.reload",
+        "title": "Reload Working Copy from Disk…",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.status",
+        "title": "Show Document Status",
+        "category": "MDV"
+      },
+      {
+        "command": "mdv.verify",
+        "title": "Verify Document",
+        "category": "MDV"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "mdv.open",
+          "when": "resourceExtname == .mdv",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "mdv.toggleReference",
+          "when": "resourceScheme == mdv && resourceLangId == markdown",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mdv.toggleDocument",
+          "when": "resourceScheme == mdv && resourceLangId == markdown",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mdv.showVersions",
+          "when": "resourceScheme == mdv && resourceLangId == markdown",
+          "group": "navigation@3"
+        },
+        {
+          "command": "mdv.preview",
+          "when": "resourceScheme == mdv && resourceLangId == markdown",
+          "group": "navigation"
+        },
+        {
+          "command": "mdv.history",
+          "when": "resourceScheme == mdv || activeCustomEditorId == mdv.overview",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MDV",
+      "properties": {
+        "mdv.previewCommand": {
+          "type": "string",
+          "default": "markdown.showPreviewToSide",
+          "scope": "window",
+          "description": "Command used by MDV: Open Markdown Preview. It receives the mdv: Markdown URI. Third-party commands must support virtual Markdown documents; bind previews always use VS Code's built-in locked previews."
+        },
+        "mdv.additionalResourceRoots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "window",
+          "description": "Additional local directories allowed for MDV images/links. Absolute paths or paths relative to the .mdv directory. Symlinks are checked against their real target."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "prepare:core": "node scripts/prepare-core.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "test": "npm run build && node scripts/test-extension.mjs",
+    "package": "npm run build && vsce package --no-dependencies --skip-license --out dist/mdv-vscode-0.1.0-preview.6.vsix"
+  },
+  "devDependencies": {
+    "@mdv/core": "file:vendor/mdv-core-0.0.0-development.tgz",
+    "@types/markdown-it": "14.2.0",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.100.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.63.0",
+    "typescript": "5.9.3"
+  }
+}
