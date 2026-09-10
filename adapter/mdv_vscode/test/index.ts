@@ -615,6 +615,16 @@ export async function run(): Promise<void> {
       assert.equal(await view.locator(`[data-id="${r3}"] .head-badge`).innerText(), 'HEAD')
       assert.equal(await view.locator(`[data-id="${d4}"] .head-badge`).innerText(), 'HEAD')
       assert.equal(await view.locator('img').count(), 0, 'Untrusted summaries are text, never HTML')
+      await view.locator('#open-reference').click()
+      await until(() => {
+        const source = parseSource(vscode.window.activeTextEditor?.document.uri ?? file)
+        return source?.content.kind === 'working-copy' && source.content.tree === 'reference'
+      }, 'clickable REF title opens the native Reference working copy')
+      await view.locator('#open-document').press('Enter')
+      await until(() => {
+        const source = parseSource(vscode.window.activeTextEditor?.document.uri ?? file)
+        return source?.content.kind === 'working-copy' && source.content.tree === 'document'
+      }, 'keyboard-accessible DOC title opens the native Document working copy')
       await view.locator(`[data-id="${r2}"]`).click()
       await view.locator('#relation').filter({ hasText: 'used by 2 Doc versions' }).waitFor()
       assert.equal(await view.locator(`.node.related[data-id="${d2}"]`).count(), 1)

@@ -66,11 +66,13 @@ export class MdvVersionView implements vscode.WebviewViewProvider, vscode.Dispos
       <main id="versions" hidden>
         <header><div id="package" title=""></div><div id="notice" role="status"></div></header>
         <div class="columns">
-          <section aria-label="Reference controls"><div class="column-title"><strong>REF</strong>
+          <section aria-label="Reference controls"><div class="column-title">
+            <button class="tree-title" data-command="mdv.editReference" id="open-reference" aria-label="Open current Reference" title="Open current Ref">REF <span aria-hidden="true">›</span></button>
             <button class="icon" data-command="mdv.toggleReference" id="toggle-reference" aria-label="Show Ref" title="Show Ref">◧</button>
             <button class="icon" data-command="mdv.commitReference" data-write title="Commit Ref version…" aria-label="Commit Ref version">＋</button></div>
             <button class="working" data-command="mdv.editReference" id="working-reference" title="Open current Ref"></button></section>
-          <section aria-label="Document controls"><div class="column-title"><strong>DOC</strong>
+          <section aria-label="Document controls"><div class="column-title">
+            <button class="tree-title" data-command="mdv.editDocument" id="open-document" aria-label="Open current Document" title="Open current Doc">DOC <span aria-hidden="true">›</span></button>
             <button class="icon" data-command="mdv.toggleDocument" id="toggle-document" aria-label="Hide Doc" title="Hide Doc">◨</button>
             <button class="icon" data-command="mdv.commitDocument" data-write title="Commit Doc version…" aria-label="Commit Doc version">＋</button></div>
             <button class="working" data-command="mdv.editDocument" id="working-document" title="Open current Doc"></button></section>

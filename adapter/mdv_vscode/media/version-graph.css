@@ -19,9 +19,11 @@ header { flex-shrink: 0; padding: 6px 8px 0; }
 .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); flex-shrink: 0; padding: 4px 8px 6px; gap: clamp(4px, 4vw, 12px); border-bottom: 1px solid var(--vscode-panel-border); }
 .columns section { min-width: 0; }
 .column-title { display: flex; align-items: center; gap: 2px; }
-.column-title strong { font-size: 11px; letter-spacing: .04em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.columns section:first-child strong { color: var(--ref-color); }
-.columns section:last-child strong { color: var(--doc-color); }
+.tree-title { display: flex; align-items: center; gap: 3px; flex: 1; min-width: 0; height: 22px; padding: 0 4px; overflow: hidden; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-align: left; }
+.tree-title span { font-size: 15px; line-height: 1; opacity: .7; }
+.tree-title:hover span, .tree-title:focus-visible span { opacity: 1; }
+.columns section:first-child .tree-title { color: var(--ref-color); }
+.columns section:last-child .tree-title { color: var(--doc-color); }
 .icon { flex-shrink: 0; width: 22px; height: 22px; padding: 0; font-size: 16px; line-height: 22px; }
 .icon[aria-pressed="true"] { background: var(--vscode-toolbar-activeBackground); }
 .working { display: block; width: 100%; padding: 2px 0; text-align: left; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-descriptionForeground); }
