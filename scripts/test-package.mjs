@@ -16,30 +16,26 @@ const env = {
   npm_config_registry: 'https://registry.npmjs.org',
   npm_config_audit: 'false', npm_config_fund: 'false',
 }
-let hasLicense = false
 try {
   // Build a source copy with no dist; only the build toolchain is shared with the repo.
   // The installed consumer below never links to the source or repository node_modules.
   const source = join(temporary, 'source')
   await mkdir(source)
-  for (const path of ['package.json', 'tsconfig.json', 'src', 'README.md', 'docs', 'schemas', 'spec']) {
+  for (const path of ['package.json', 'tsconfig.json', 'src', 'README.md', 'docs', 'schemas', 'spec', 'THIRD_PARTY_NOTICES']) {
     await cp(join(root, path), join(source, path), { recursive: true })
   }
-  try {
-    await cp(join(root, 'LICENSE'), join(source, 'LICENSE'))
-    hasLicense = true
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-  }
+  await cp(join(root, 'LICENSE'), join(source, 'LICENSE'))
   await symlink(join(root, 'node_modules'), join(source, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
   await command([npm, 'run', 'prepare'], source)
   const packed = await command([npm, 'pack', '--json', '--ignore-scripts', '--pack-destination', temporary], source)
   const [archive] = JSON.parse(packed)
   const files = new Set(archive.files.map((file) => file.path))
-  for (const required of ['package.json', 'README.md', 'dist/index.js', 'dist/index.d.ts', 'spec/format-0.1.md']) {
+  for (const required of [
+    'package.json', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES',
+    'dist/index.js', 'dist/index.d.ts', 'spec/format-0.1.md',
+  ]) {
     assert.ok(files.has(required), `Missing packaged file: ${required}`)
   }
-  if (hasLicense) assert.ok(files.has('LICENSE'), 'The reviewed LICENSE must be included in the tarball')
   assert.ok([...files].some((path) => path.startsWith('schemas/') && path.endsWith('.json')))
   for (const path of files) {
     assert.ok(!/^(src|test|scripts|bench|node_modules|\.git|\.github)\//.test(path), `Unexpected packaged file: ${path}`)

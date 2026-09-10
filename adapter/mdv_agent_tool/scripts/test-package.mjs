@@ -15,6 +15,10 @@ const { stdout } = await run(process.execPath, [npm, 'pack', '--json', '--ignore
 const [packed] = JSON.parse(stdout)
 assert.ok(packed.files.some(({ path }) => path === 'dist/cli.cjs'))
 assert.ok(packed.files.some(({ path }) => path === 'LICENSE'), 'Agent tarball must include its license')
+assert.ok(
+  packed.files.some(({ path }) => path === 'dist/THIRD_PARTY_NOTICES'),
+  'Agent tarball must include bundled dependency notices',
+)
 assert.ok(packed.files.every(({ path }) => !/^(src|test|vendor|node_modules)\//.test(path)))
 await writeFile(join(temporary, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
 await run(process.execPath, [npm, 'install', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', join(temporary, packed.filename)], { cwd: temporary })
@@ -22,6 +26,10 @@ const installed = join(temporary, 'node_modules/@mdv/agent-tool')
 const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
 assert.equal(manifest.license, 'Apache-2.0')
 assert.equal(manifest.dependencies, undefined, 'The CLI must bundle its fixed Core; no unpublished Core dependency at runtime')
+const notices = await readFile(join(installed, 'dist/THIRD_PARTY_NOTICES'), 'utf8')
+for (const dependency of ['yauzl 3.4.0', 'yazl 3.3.1', 'pend 1.2.0', 'buffer-crc32 1.0.0']) {
+  assert.match(notices, new RegExp(dependency.replaceAll('.', '\\.')))
+}
 const cli = join(installed, manifest.bin.mdv)
 assert.equal((await run(process.execPath, [cli, '--version'], { cwd: temporary })).stdout.trim(), manifest.version)
 const bin = join(temporary, 'node_modules/.bin/mdv' + (process.platform === 'win32' ? '.cmd' : ''))

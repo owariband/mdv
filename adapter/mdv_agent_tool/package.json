@@ -20,6 +20,7 @@
     "dist/cli.cjs",
     "dist/cli.cjs.LEGAL.txt",
     "dist/core-build.json",
+    "dist/THIRD_PARTY_NOTICES",
     "README.md"
   ],
   "scripts": {

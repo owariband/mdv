@@ -19,9 +19,10 @@
   "files": [
     "dist",
     "docs/**/*.md",
-    "docs/assets/mdv-icon.svg",
+    "docs/assets/mdv-icon*.svg",
     "schemas",
-    "spec"
+    "spec",
+    "THIRD_PARTY_NOTICES"
   ],
   "exports": {
     ".": {

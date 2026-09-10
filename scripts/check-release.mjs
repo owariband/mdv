@@ -18,7 +18,7 @@ for (const [name, pkg] of Object.entries(lock.packages)) {
   if (pkg.resolved) assert.ok(pkg.resolved.startsWith('https://registry.npmjs.org/'), `Non-public lockfile URL: ${name}`)
 }
 for (const path of ['dist/index.js', 'dist/index.d.ts', 'README.md', 'spec/format-0.1.md',
-  'docs/compatibility.md', 'docs/releasing.md']) await access(join(root, path))
+  'docs/compatibility.md', 'docs/releasing.md', 'THIRD_PARTY_NOTICES']) await access(join(root, path))
 
 const blockers = []
 if (manifest.version === '0.0.0-development' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) {

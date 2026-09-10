@@ -17,7 +17,7 @@ npm run bench -- --quick
 
 1. 在临时目录复制源码，不复制仓库 `dist/`；仅构建工具链链接到现有 `node_modules`。
 2. 显式运行 `prepare` 生成产物，再 `npm pack --ignore-scripts --json`，避免重复构建并检查真实打包文件清单。
-3. 将 `.tgz` 安装进另一个独立 consumer，禁用安装脚本并只安装运行依赖，先验证 package-root 读写、版本、CAS、Diff、校验和图片闭环。
+3. 确认 tarball 同时包含 Apache-2.0 `LICENSE` 与 `THIRD_PARTY_NOTICES`，再将 `.tgz` 安装进另一个独立 consumer，禁用安装脚本并只安装运行依赖，验证 package-root 读写、版本、CAS、Diff、校验和图片闭环。
 4. 安装固定 TypeScript 5.9.3，再分别使用它和仓库当前编译器检查 strict NodeNext consumer，含只读能力、必填 bind/generation、内部路径拒绝等负向类型断言。
 5. 清理此次创建的临时目录。不会修改全局 npm/Git 配置，不发布到 registry。
 
@@ -52,7 +52,7 @@ npm run check:release -- --release
 首次发布前由 owner 完成：
 
 - 确认 `@owariband` npm scope 的实际发布权限；包名已经确定为 `@owariband/mdv`，授权方式已经确定为 Apache-2.0，最终发布前仍应由权利人确认授权范围。
-- 选择正式或预发布版本，同步 package/lock，并检查最终 tarball 包含 LICENSE、运行代码、声明和规范；不能把 `0.0.0-development` 当作正式版本。
+- 选择正式或预发布版本，同步 package/lock，并检查最终 tarball 包含 LICENSE、THIRD_PARTY_NOTICES、运行代码、声明和规范；依赖版本变化时同步复核第三方声明，不能把 `0.0.0-development` 当作正式版本。
 - 在待发布提交上确认 [CI](../.github/workflows/ci.yml) 全部结果、平台 skip 原因、安装验证和性能基线；本地脚本不冒充远端 CI 审批。
 - 审阅[兼容策略](./compatibility.md)、[性能边界](./performance.md)和[开发日志](./design/dev_log.md)，记录发布说明及适用平台。
 - 通过 owner 授权的流程发布并记录 tag/版本；本仓库不会因为合并、push 或运行测试自动发布。

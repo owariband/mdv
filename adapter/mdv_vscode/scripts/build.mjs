@@ -26,6 +26,7 @@ await build({
   platform: 'node', format: 'cjs', target: 'node20', external: ['vscode'], legalComments: 'linked',
 })
 await copyFile('vendor/core-build.json', 'dist/core-build.json')
+await copyFile(new URL('../../../THIRD_PARTY_NOTICES', import.meta.url), 'dist/THIRD_PARTY_NOTICES')
 await build({
   entryPoints: ['test/index.ts'], outfile: 'dist/test.cjs', bundle: true,
   platform: 'node', format: 'cjs', target: 'node20', external: ['vscode', 'playwright-core'],

@@ -27,3 +27,4 @@ await build({
 })
 await chmod('dist/cli.cjs', 0o755)
 await copyFile('vendor/core-build.json', 'dist/core-build.json')
+await copyFile(new URL('../../../THIRD_PARTY_NOTICES', import.meta.url), 'dist/THIRD_PARTY_NOTICES')

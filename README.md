@@ -1,70 +1,76 @@
 <p align="center">
-  <img src="docs/assets/mdv-icon.svg" alt="MDV cat icon" width="112" height="112">
+  <img src="docs/assets/mdv-readme-mark.svg" alt="MDV cat document mark" width="104" height="104">
 </p>
 
-# MDV
+<h1 align="center">MDV</h1>
 
-MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@owariband/mdv` 是它的 TypeScript 参考实现。
+<p align="center"><strong>Markdown, with memory.</strong></p>
 
-> 当前状态：开发预览。M5.5 产品能力已完成，包含双树读写、显式版本/bind、trace、Diff/诊断与受管图片。M6 已补充安装验证、安全回归和性能基线，三系统 CI 的 10 组检查已通过；Core 发布身份已确定为 `@owariband/mdv`，项目采用 Apache-2.0，正式版本与 npm 发布仍待收口。平台证据与限制见[兼容性文档](docs/compatibility.md)。
+<p align="center">两份工作副本 · 两棵独立历史 · 一条精确绑定</p>
 
-## 为什么使用 MDV
+<p align="center">
+  <a href="https://github.com/owariband/mdv/actions/workflows/ci.yml"><img src="https://github.com/owariband/mdv/actions/workflows/ci.yml/badge.svg" alt="Core verification"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-263340" alt="Apache License 2.0"></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D20-263340" alt="Node.js 20 or newer">
+</p>
 
-- Reference 与 Document 各自拥有工作副本和版本历史。
-- 不做版本操作时，`current.md` 就是一份普通、可覆盖保存的 Markdown；编辑器内存状态仍由宿主管理。
-- 普通保存与 commit 分离，只有显式 commit 才固化版本。
-- 每个 Document Version 精确绑定一个 Reference Version，或明确绑定 `null`。
-- Markdown 原始字节保持不变，渲染继续交给 VS Code、MarkText、remark 等上层工具。
-- `.mdv` 是普通 ZIP 容器，格式由独立规范、Schema 和一致性 fixtures 约束。
+<p align="center">
+  <a href="#先看-mdv-在做什么">动画</a> ·
+  <a href="#一分钟上手">一分钟上手</a> ·
+  <a href="docs/README.md">文档</a> ·
+  <a href="spec/format-0.1.md">格式规范</a>
+</p>
 
-## 当前可用能力
+MDV（Markdown Document with Versions）把一份 Markdown 的输入依据（Reference）与交付结果（Document）放进同一个可验证容器：它们可以各自编辑、各自演进，而每个已提交的 Document Version 都会记住自己使用的那一个精确 Reference Version。
 
-```ts
-import { createMdv, openMdv } from '@owariband/mdv'
+> **Development Preview** — Format 0.1 与当前能力已经可以从源码验证；Core 仍是 `0.0.0-development`，尚未发布到 npm，也尚未作出 0.1 稳定 API 承诺。
 
-let document = await createMdv('/documents/example.mdv')
-document = await document.saveDocument({
-  markdown: '# Hello MDV\n',
-  expectedGeneration: document.manifest.generation,
-})
+## 先看 MDV 在做什么
 
-const committed = await document.commitDocument({
-  referenceVersion: null,
-  actor: { type: 'human', name: 'Hypnos' },
-  summary: 'Create the first Document version',
-  expectedGeneration: document.manifest.generation,
-})
-document = committed.document
+### 01 / The Living Graph
 
-const reopened = await openMdv('/documents/example.mdv')
-console.log(await reopened.readDocumentText())
+<p align="center">
+  <img src="docs/assets/promo/a-living-graph.gif" alt="MDV animation showing two independent histories and one exact bind" width="720">
+</p>
 
-const documentHead = reopened.documentTree.head
-if (documentHead !== null) {
-  const trace = reopened.traceDocument(documentHead)
-  console.log(trace.reference)
+Reference 与 Document 各自拥有一棵历史。Document D02 精确绑定 Reference R02；即使 Reference HEAD 继续走到 R03，已经存在的 bind 也不会漂移。
 
-  const review = await reopened.diff(
-    { tree: 'document', kind: 'version', version: documentHead },
-    { tree: 'document', kind: 'working-copy' },
-  )
-  console.log(review.unifiedText)
-}
+### 02 / The Editorial Memory
 
-console.log(await reopened.getStatus())
+<p align="center">
+  <img src="docs/assets/promo/b-editorial-memory.gif" alt="MDV animation showing what was asked beside what was delivered" width="720">
+</p>
+
+“当时要求了什么”和“最终交付了什么”可以独立变化。MDV 保存的不是一个模糊的最新来源，而是这份结果真正使用过的那一版上下文。
+
+### 03 / Native Proof
+
+<p align="center">
+  <img src="docs/assets/promo/c-native-proof.gif" alt="MDV animation showing native Markdown editing and a visible version graph in VS Code" width="720">
+</p>
+
+正文仍然是原生 Markdown：继续使用 VS Code 的编辑器、预览器和扩展生态；MDV 只补上双工作副本、可见历史与精确 bind。画面来自 VS Code adapter 的真实集成测试，不是重新画出的概念 UI。
+
+## 一个简单、明确的模型
+
+```text
+Reference buffer ── save ──> ref_tree/current.md ── commit ──> R01 ──> R02 ──> R03
+Document buffer  ── save ──> doc_tree/current.md ── commit ──> D01 ──> D02
+                                                                         │
+                                                                         └── bind ──> R02
 ```
 
-当前已支持创建空 MDV、从文件或内存打开、保存两份工作副本、显式提交不可变版本、checkout 历史版本、读取历史正文、查询两棵版本树并追踪 bind。普通 save 只更新目标 `current.md` 并递增 generation，不创建 Version、也不移动 HEAD。多个进程同时编辑时，Core 通过 generation CAS 报告 `CONFLICT`，由 VS Code、MarkText 或其他宿主决定重载、比较或合并，就像处理普通 Markdown 被外部修改一样。
+- **Save 不是 commit。** Save 只持久化可覆盖的 `current.md`；只有显式 commit 才创建不可变 Version。
+- **Bind 属于版本。** 每个 Document Version 绑定一个精确的 Reference Version，或明确绑定 `null`；它不会跟随 HEAD 自动更新。
+- **Markdown 是保真边界。** Core 返回原始 UTF-8 Markdown bytes/text，不生成 AST、不渲染 HTML，也不擅自格式化正文。
+- **容器保持透明。** `.mdv` 是普通 ZIP，物理结构由独立的 Format 0.1、JSON Schema 与一致性 fixtures 约束。
+- **并发不会静默覆盖。** 写操作使用 generation CAS；宿主收到 `CONFLICT` 后决定重载、比较或合并。
 
-M4 沿用普通 Markdown 编辑底座，没有引入 `DraftVersion`、`workspace` 或 pending bind。commit 只固化已经 save 的 `current.md`；Document bind 只属于 commit 后的不可变 Document Version。checkout 默认拒绝覆盖 dirty 工作副本，只有显式 `discardChanges: true` 才允许丢弃它。
+这套模型适合需要保留“输入依据 → 交付结果”关系的写作、评审和 Agent 工作流；它不是仓库级 Git、Markdown renderer 或协同编辑协议。
 
-M5 增加的是通用、只读、Agent-friendly 原语：`getStatus()` 报告两棵工作副本与 bind 漂移，`readContent()` 精确选择任意工作副本或历史 Version，`diff()` 可以比较包括 Document ↔ Document 在内的任意两份来源，顶层 `verifyMdv()` 可诊断无法正常 open 的损坏包。它们不包含 Markdown AST、渲染、Review UI 或 Agent 专属协议。
+## 一分钟上手
 
-M5.5 已补齐受管图片：`importManagedResource()` 导入 PNG/JPEG/GIF/WebP 并返回可插入 Markdown 的 hash 相对路径；`resolveManagedResource()` 返回本地绝对路径，`readManagedResource()` / `verifyManagedResource()` 读取并校验内容。图片位于 `.mdv-assets/` 外部目录，不改动 ZIP 或 generation；普通 Markdown 图片路径仍可以自行命名和放置。完整用法见[图片与相对资源](docs/resources.md)。
-
-## 从源码使用
-
-项目尚未发布到 npm。当前可以从源码构建并作为本地依赖使用：
+### 1. 从源码构建
 
 ```bash
 git clone https://github.com/owariband/mdv.git
@@ -80,34 +86,90 @@ npm run build
 npm install /absolute/path/to/mdv
 ```
 
-仓库的 `prepare` 生命周期会生成 `dist/`，因此干净 checkout、本地目录、Git dependency 和 `npm pack` 不依赖预先提交构建产物。
+运行时要求 Node.js 20+ 与 ESM `import`。正式 npm 包尚未发布，当前请不要使用一个并不存在的 registry 版本号。
 
-运行时要求 Node.js 20 或更高版本，并使用 ESM `import`。
+### 2. 保存两份工作副本，并提交一次精确绑定
 
-## 文档
+```ts
+import { createMdv } from '@owariband/mdv'
 
-- [官方使用文档](docs/README.md)
-- [快速开始](docs/getting-started.md)
-- [核心概念](docs/concepts.md)
-- [当前 API 参考](docs/api-reference.md)
-- [图片与相对资源](docs/resources.md)
-- [兼容性与平台边界](docs/compatibility.md)
-- [性能基线](docs/performance.md)
+let mdv = await createMdv('./launch-plan.mdv')
+
+mdv = await mdv.saveReference({
+  markdown: '# Brief\n\nKeep the interface native.\n',
+  expectedGeneration: mdv.manifest.generation,
+})
+
+const reference = await mdv.commitReference({
+  actor: { type: 'human', name: 'Hypnos' },
+  summary: 'Approve the launch brief',
+  expectedGeneration: mdv.manifest.generation,
+})
+if (!reference.created) throw new Error('Expected a new Reference Version')
+mdv = reference.document
+
+mdv = await mdv.saveDocument({
+  markdown: '# Launch plan\n\nShip native Markdown with visible history.\n',
+  expectedGeneration: mdv.manifest.generation,
+})
+
+const document = await mdv.commitDocument({
+  referenceVersion: reference.version,
+  actor: { type: 'agent', id: 'writer-agent' },
+  summary: 'Deliver the launch plan',
+  expectedGeneration: mdv.manifest.generation,
+})
+if (!document.created) throw new Error('Expected a new Document Version')
+
+console.log(document.document.traceDocument(document.version).reference?.id)
+```
+
+继续阅读[快速开始](docs/getting-started.md)，可以完成 open、checkout、trace、Diff、诊断以及受管图片闭环。
+
+## 三个独立层次
+
+| 层次 | 当前形态 | 做什么 |
+| --- | --- | --- |
+| [Core](docs/README.md) | TypeScript / Node.js ESM | 读写容器、版本、bind、trace、Diff、诊断与受管图片 |
+| [MDV for VS Code](adapter/mdv_vscode/README.md) | 本地 VSIX 预览版 | 原生 Markdown 编辑与预览、双列版本图、历史恢复与精确绑定预览 |
+| [MDV Agent Tool](adapter/mdv_agent_tool/README.md) | 本地 CLI 预览版 | 成对读取、状态、版本、trace、Diff、诊断，以及权限感知的写入流程 |
+
+Adapter 分别安装，不会随着 Core 自动进入编辑器或 Agent；它们也不会引入第二套 Markdown renderer。
+
+## 文档地图
+
+- [快速开始](docs/getting-started.md) — 创建、保存、commit、checkout 与读取。
+- [核心概念](docs/concepts.md) — 工作副本、Version、HEAD、bind 与 generation。
+- [API 参考](docs/api-reference.md) — 当前公开方法、类型与错误码。
+- [图片与相对资源](docs/resources.md) — 普通路径与 hash sidecar。
+- [兼容性与平台边界](docs/compatibility.md) — 运行环境、文件系统语义与默认预算。
+- [Container Format 0.1](spec/format-0.1.md) — 兼容 Reader / Writer 的规范性基线。
+
+<details>
+<summary>维护者与发布资料</summary>
+
 - [验证与发布检查](docs/releasing.md)
-- [MDV Container Format 0.1](spec/format-0.1.md)
-- [维护者设计资料](docs/design/index.md)
+- [性能基线](docs/performance.md)
+- [维护者设计索引](docs/design/index.md)
+- [开发路线图](docs/design/roadmap.md)
 
-## 开发
+</details>
+
+## 开发与验证
 
 ```bash
-npm run fixtures
+npm run fixtures:check
 npm run check
 npm run test:package
 npm run bench -- --quick
 ```
 
-开发路线见[内部路线图](docs/design/roadmap.md)。VS Code extension、MarkText adapter 和 CLI 都是 Core 的上游项目，不属于本包的内部层次。
+CI 在 Ubuntu、macOS 与 Windows 上覆盖 Node.js 22 / 24 / 26，并额外验证 Ubuntu / Node.js 20。`npm run test:package` 会从干净源码构建真实 tarball，再交给独立 runtime 与 TypeScript consumer 安装验证。
 
-## 发布与许可证状态
+首次发布前仍需由 owner 确认 `@owariband` npm scope 权限、选择正式或预发布版本，并在目标提交上完成[发布检查](docs/releasing.md)。
 
-Core 发布包名已确定为 `@owariband/mdv`，仓库及三个分发包采用 [Apache License 2.0](LICENSE)。当前版本仍为 `0.0.0-development`；构建/发布检查生命周期已经建立，首次发布前仍需确认 npm scope 发布权限并选择正式或预发布版本。`npm run check:release -- --release` 在版本未收口时会失败，不会自动发布；在此之前不要把当前 API 当作 0.1 稳定承诺。
+## License
+
+MDV 使用 [Apache License 2.0](LICENSE)。在遵守许可证条款的前提下，可以使用、修改和分发本项目，包括商业使用；分发修改版本时需要保留适用的许可证与版权声明，并说明所作修改。Apache-2.0 还包含明确的贡献者专利授权。
+
+仓库根目录与两个 adapter 使用完全相同的 Apache-2.0 标准正文。打包进 adapter 单文件产物的第三方组件及其许可见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。本节只是便于阅读的说明，不替代许可证正文，也不构成法律意见；发生差异时以 `LICENSE` 与第三方许可原文为准。

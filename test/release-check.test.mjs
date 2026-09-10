@@ -13,7 +13,7 @@ test('release gates distinguish development, missing decisions and a prepared pa
   const manifest = JSON.parse(await readFile('package.json', 'utf8'))
   const lock = { packages: { '': { name: manifest.name, version: manifest.version, license: manifest.license } } }
   for (const path of ['dist/index.js', 'dist/index.d.ts', 'README.md', 'spec/format-0.1.md',
-    'docs/compatibility.md', 'docs/releasing.md']) {
+    'docs/compatibility.md', 'docs/releasing.md', 'THIRD_PARTY_NOTICES']) {
     await mkdir(dirname(join(root, path)), { recursive: true })
     await writeFile(join(root, path), '// synthetic gate fixture; not a release artifact\n')
   }

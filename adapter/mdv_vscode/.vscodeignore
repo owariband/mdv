@@ -5,4 +5,5 @@
 !dist/extension.cjs
 !dist/extension.cjs.LEGAL.txt
 !dist/core-build.json
+!dist/THIRD_PARTY_NOTICES
 !media/**
