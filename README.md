@@ -6,7 +6,7 @@
 
 <p align="center"><strong>Markdown, with memory.</strong></p>
 
-<p align="center">两份工作副本 · 两棵独立历史 · 一条精确绑定</p>
+<p align="center">提示词不必重写 · 人的原稿不会丢失 · 每次交付都有来路</p>
 
 <p align="center">
   <a href="https://github.com/owariband/mdv/actions/workflows/ci.yml"><img src="https://github.com/owariband/mdv/actions/workflows/ci.yml/badge.svg" alt="Core verification"></a>
@@ -15,15 +15,30 @@
 </p>
 
 <p align="center">
+  <a href="#mdv-解决什么问题">为什么是 MDV</a> ·
   <a href="#先看-mdv-在做什么">动画</a> ·
   <a href="#一分钟上手">一分钟上手</a> ·
   <a href="docs/README.md">文档</a> ·
   <a href="spec/format-0.1.md">格式规范</a>
 </p>
 
-MDV（Markdown Document with Versions）把一份 Markdown 的输入依据（Reference）与交付结果（Document）放进同一个可验证容器：它们可以各自编辑、各自演进，而每个已提交的 Document Version 都会记住自己使用的那一个精确 Reference Version。
+AI 越来越好用，我们也越来越愿意让它参与写作和改稿。但今天的大多数文档工作流没有跟上：AI 越能干，散落在对话里的上下文和只剩最新版的文档就越容易成为隐患。
 
-> **Development Preview** — Format 0.1 与当前能力已经可以从源码验证；Core 仍是 `0.0.0-development`，尚未发布到 npm，也尚未作出 0.1 稳定 API 承诺。
+换一个对话、模型或 Agent，人就要重新粘贴提示词、需求、背景和约束；让 AI 直接修改 Markdown，又往往只留下“最新结果”，把人原本写下的文档和中间版本覆盖掉。最后虽然得到了一份成品，却很难回答：**它依据的是哪一版要求，又是从哪一版原稿演进而来的？**
+
+**MDV 就是在这个背景下推出的。** 它把给 AI 的提示词、brief 和背景材料保存为 **Reference**，把人的原始文档以及后续的人机协作稿保存为 **Document**。两者位于同一个 `.mdv` 文件中，却可以独立编辑、独立形成不可变版本；下一次 Agent 可以从同一个文件读回上下文，每个 Document Version 也会精确绑定它实际使用的 Reference Version。
+
+> **MDV 已公开发布。** Format 0.1、Core、VS Code adapter 与 Agent Tool 均已在本仓库开放，可以直接获取、构建和使用；当前公开发布渠道为 GitHub 源码。
+
+## MDV 解决什么问题
+
+| AI 文档工作流里的问题 | MDV 的回答 |
+| --- | --- |
+| 换一个会话就要重新写提示词、重新交代上下文 | 将提示词、brief、规范和背景保存为可复用、可版本化的 Reference，下一次 Agent 可以直接读回 |
+| AI 改完只剩最新版，人的原稿和中间版本容易被覆盖 | Document 拥有独立历史；每次显式 commit 都形成不可变版本，原稿与历次修改都能找回 |
+| 文档与提示词都在变化，事后说不清某份结果用了哪版要求 | 每个 Document Version 精确 bind 到当时使用的 Reference Version，可以追溯、比较和验证 |
+
+MDV（Markdown Document with Versions）不是再造一个编辑器，而是给现有 Markdown 工作流补上一层可携带的记忆：不必反复重写上下文，也不必拿人的原始文档去交换 AI 的便利。
 
 ## 先看 MDV 在做什么
 
@@ -70,7 +85,7 @@ Document buffer  ── save ──> doc_tree/current.md ── commit ──> D
 
 ## 一分钟上手
 
-### 1. 从源码构建
+### 1. 从 GitHub 获取并构建
 
 ```bash
 git clone https://github.com/owariband/mdv.git
@@ -86,7 +101,7 @@ npm run build
 npm install /absolute/path/to/mdv
 ```
 
-运行时要求 Node.js 20+ 与 ESM `import`。正式 npm 包尚未发布，当前请不要使用一个并不存在的 registry 版本号。
+运行时要求 Node.js 20+ 与 ESM `import`。当前公开发行版以本 GitHub 仓库中的源码、格式规范和验证结果为准。
 
 ### 2. 保存两份工作副本，并提交一次精确绑定
 
@@ -131,8 +146,8 @@ console.log(document.document.traceDocument(document.version).reference?.id)
 | 层次 | 当前形态 | 做什么 |
 | --- | --- | --- |
 | [Core](docs/README.md) | TypeScript / Node.js ESM | 读写容器、版本、bind、trace、Diff、诊断与受管图片 |
-| [MDV for VS Code](adapter/mdv_vscode/README.md) | 本地 VSIX 预览版 | 原生 Markdown 编辑与预览、双列版本图、历史恢复与精确绑定预览 |
-| [MDV Agent Tool](adapter/mdv_agent_tool/README.md) | 本地 CLI 预览版 | 成对读取、状态、版本、trace、Diff、诊断，以及权限感知的写入流程 |
+| [MDV for VS Code](adapter/mdv_vscode/README.md) | VS Code extension | 原生 Markdown 编辑与预览、双列版本图、历史恢复与精确绑定预览 |
+| [MDV Agent Tool](adapter/mdv_agent_tool/README.md) | CLI / Agent adapter | 成对读取、状态、版本、trace、Diff、诊断，以及权限感知的写入流程 |
 
 Adapter 分别安装，不会随着 Core 自动进入编辑器或 Agent；它们也不会引入第二套 Markdown renderer。
 
@@ -166,7 +181,7 @@ npm run bench -- --quick
 
 CI 在 Ubuntu、macOS 与 Windows 上覆盖 Node.js 22 / 24 / 26，并额外验证 Ubuntu / Node.js 20。`npm run test:package` 会从干净源码构建真实 tarball，再交给独立 runtime 与 TypeScript consumer 安装验证。
 
-首次发布前仍需由 owner 确认 `@owariband` npm scope 权限、选择正式或预发布版本，并在目标提交上完成[发布检查](docs/releasing.md)。
+MDV 已通过 GitHub 公开发布。后续每次进行版本化分发时，维护者仍会在目标提交上完成[发布检查](docs/releasing.md)，确认包内容、跨平台验证、许可证与第三方声明保持一致。
 
 ## License
 
