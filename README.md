@@ -1,3 +1,7 @@
+<p align="right">
+  <a href="README.en.md">English</a> · <strong>简体中文</strong>
+</p>
+
 <p align="center">
   <img src="docs/assets/mdv-readme-mark.svg" alt="MDV cat document mark" width="104" height="104">
 </p>
@@ -16,6 +20,7 @@
 
 <p align="center">
   <a href="#mdv-解决什么问题">为什么是 MDV</a> ·
+  <a href="#我们提供什么">产品</a> ·
   <a href="#先看-mdv-在做什么">动画</a> ·
   <a href="#一分钟上手">一分钟上手</a> ·
   <a href="docs/README.md">文档</a> ·
@@ -28,7 +33,7 @@ AI 越来越好用，我们也越来越愿意让它参与写作和改稿。但�
 
 **MDV 就是在这个背景下推出的。** 它把给 AI 的提示词、brief 和背景材料保存为 **Reference**，把人的原始文档以及后续的人机协作稿保存为 **Document**。两者位于同一个 `.mdv` 文件中，却可以独立编辑、独立形成不可变版本；下一次 Agent 可以从同一个文件读回上下文，每个 Document Version 也会精确绑定它实际使用的 Reference Version。
 
-> **MDV 已公开发布。** Format 0.1、Core、VS Code adapter 与 Agent Tool 均已在本仓库开放，可以直接获取、构建和使用；当前公开发布渠道为 GitHub 源码。
+> **MDV 已公开发布。** Format 0.1、Core、VS Code Plugin 与 Agent Tool 均已在本仓库开放，可以直接获取、构建和使用；当前公开发布渠道为 GitHub 源码。
 
 ## MDV 解决什么问题
 
@@ -39,6 +44,26 @@ AI 越来越好用，我们也越来越愿意让它参与写作和改稿。但�
 | 文档与提示词都在变化，事后说不清某份结果用了哪版要求 | 每个 Document Version 精确 bind 到当时使用的 Reference Version，可以追溯、比较和验证 |
 
 MDV（Markdown Document with Versions）不是再造一个编辑器，而是给现有 Markdown 工作流补上一层可携带的记忆：不必反复重写上下文，也不必拿人的原始文档去交换 AI 的便利。
+
+## 我们提供什么
+
+MDV 不只是一种文件扩展名。这个仓库提供一套完整的 MDV 文档范式，以及分别面向开发者、人和 Agent 的三个可用组件：
+
+**一句话概括：Core 负责解析 `.mdv`，VS Code Plugin 让人阅读 `.mdv`，Agent Tool 让 Agent 操作 `.mdv`。**
+
+| 组件 | 面向谁 | 提供什么 |
+| --- | --- | --- |
+| [MDV Core](docs/README.md) — 文档范式解析库 | 开发者与工具作者 | `.mdv` 格式的 TypeScript 参考实现：解析、创建、校验和读写 MDV，并管理 Reference / Document 两棵版本树、精确 bind、Diff、Trace 与受管资源 |
+| [MDV for VS Code](adapter/mdv_vscode/README.md) — VS Code Plugin | 人 | 在 VS Code 中直接阅读 `.mdv`：复用原生 Markdown 编辑器和预览器，查看 Reference / Document、双列版本图与精确绑定；也可以编辑、保存、commit 和恢复历史版本 |
+| [MDV Agent Tool](adapter/mdv_agent_tool/README.md) — Agent Tool | AI Agent | 让 Agent 通过权限感知的 CLI 安全操作 `.mdv`：读取成对上下文，查询状态、版本、Trace、Diff 和诊断，并在明确边界内保存、commit 或 checkout |
+
+```text
+Human  ⇄  MDV for VS Code ─┐
+                            ├─⇄ MDV Core ⇄ .mdv
+Agent  ⇄  MDV Agent Tool ──┘
+```
+
+VS Code Plugin 和 Agent Tool 都建立在同一套 Core 与 Format 0.1 上：人看到的、Agent 读取的和磁盘中保存的是同一种 MDV 语义，不需要在三套模型之间转换。
 
 ## 先看 MDV 在做什么
 
@@ -140,16 +165,6 @@ console.log(document.document.traceDocument(document.version).reference?.id)
 ```
 
 继续阅读[快速开始](docs/getting-started.md)，可以完成 open、checkout、trace、Diff、诊断以及受管图片闭环。
-
-## 三个独立层次
-
-| 层次 | 当前形态 | 做什么 |
-| --- | --- | --- |
-| [Core](docs/README.md) | TypeScript / Node.js ESM | 读写容器、版本、bind、trace、Diff、诊断与受管图片 |
-| [MDV for VS Code](adapter/mdv_vscode/README.md) | VS Code extension | 原生 Markdown 编辑与预览、双列版本图、历史恢复与精确绑定预览 |
-| [MDV Agent Tool](adapter/mdv_agent_tool/README.md) | CLI / Agent adapter | 成对读取、状态、版本、trace、Diff、诊断，以及权限感知的写入流程 |
-
-Adapter 分别安装，不会随着 Core 自动进入编辑器或 Agent；它们也不会引入第二套 Markdown renderer。
 
 ## 文档地图
 
