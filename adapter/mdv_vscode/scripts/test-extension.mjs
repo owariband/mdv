@@ -62,7 +62,7 @@ if (restricted || recovery !== '0' || process.argv.includes('--installed')) {
   await cp(join(root, 'test/markdown-contribution'), join(installed, 'mdv-test.mdv-markdown-contribution-test-0.0.1'), { recursive: true })
   if (markdownExtension) await cp(markdownExtension, join(installed, 'yzhang.markdown-all-in-one'), { recursive: true })
   const installation = await promisify(execFile)(cli, ['--user-data-dir', userData, '--extensions-dir', installed,
-    '--shared-data-dir', join(temporary, 'shared-data'), '--install-extension', join(root, 'dist/mdv-vscode-0.1.0-preview.6.vsix')])
+    '--shared-data-dir', join(temporary, 'shared-data'), '--install-extension', join(root, 'dist/mdv-vscode-0.1.0-preview.7.vsix')])
   console.log(installation.stdout)
   const child = spawn(binary, options.launchArgs, {
     env: { ...process.env, ...options.extensionTestsEnv, MDV_LIFECYCLE_TEST_ENTRY: options.extensionTestsPath },

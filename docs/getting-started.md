@@ -1,6 +1,6 @@
 # 快速开始
 
-本页介绍如何从源码构建当前开发版，并通过 `@mdv/core` 的当前 API 创建、打开、保存、commit、checkout、比较和诊断一个 `.mdv` 文件，以及导入图片。
+本页介绍如何从源码构建当前开发版，并通过 `@owariband/mdv` 的当前 API 创建、打开、保存、commit、checkout、比较和诊断一个 `.mdv` 文件，以及导入图片。
 
 ## 环境要求
 
@@ -8,7 +8,7 @@
 - ESM 项目，或能够加载 ESM package 的构建工具；
 - npm。
 
-`@mdv/core` 尚未发布到 npm registry，因此现在不能依赖一个正式版本号安装。
+`@owariband/mdv` 尚未发布到 npm registry，因此现在不能依赖一个正式版本号安装。
 
 ## 构建 Core
 
@@ -31,7 +31,7 @@ npm install /absolute/path/to/mdv
 ## 创建并保存
 
 ```ts
-import { createMdv } from '@mdv/core'
+import { createMdv } from '@owariband/mdv'
 
 let mdv = await createMdv('/documents/example.mdv')
 
@@ -57,7 +57,7 @@ save 不等于 commit。上面的两次保存不会创建历史 Version；只有
 也可以先在文件系统或 VS Code 资源管理器中新建空白 `example.mdv`，再用 `openMdv` 打开，不需要先执行专用创建命令：
 
 ```ts
-import { openMdv } from '@mdv/core'
+import { openMdv } from '@owariband/mdv'
 
 let document = await openMdv('/documents/example.mdv') // 已有的 0 字节文件；只读打开
 document = await document.saveDocument({
@@ -137,7 +137,7 @@ mdv = await mdv.checkoutDocument({
 ## 打开文件
 
 ```ts
-import { MdvError, openMdv } from '@mdv/core'
+import { MdvError, openMdv } from '@owariband/mdv'
 
 try {
   const mdv = await openMdv('/documents/example.mdv')
@@ -160,7 +160,7 @@ try {
 
 ```ts
 import { readFile } from 'node:fs/promises'
-import { parseMdv } from '@mdv/core'
+import { parseMdv } from '@owariband/mdv'
 
 const bytes = await readFile('/documents/example.mdv')
 const snapshot = await parseMdv(bytes, {
@@ -243,7 +243,7 @@ if (documentHead !== null) {
 如果文件无法正常打开，或者需要检查所有未被访问的历史分支，直接使用顶层诊断入口：
 
 ```ts
-import { verifyMdv } from '@mdv/core'
+import { verifyMdv } from '@owariband/mdv'
 
 const report = await verifyMdv('/documents/example.mdv', { mode: 'full' })
 console.log(report.valid, report.complete, report.issues)

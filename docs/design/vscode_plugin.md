@@ -2,11 +2,11 @@
 
 > 最后更新：2026-09-09
 >
-> 状态：U1 本地预览版已实现，当前产物为 `0.1.0-preview.6`；包含原生 Doc 默认入口、Ref/Doc 显隐、双列版本图、自适应侧栏、入口生命周期修复和猫头活动栏图标。实际验收与待验证范围见 §8，不代表 Marketplace 发布或全平台兼容承诺。
+> 状态：U1 本地预览版已实现，当前产物为 `0.1.0-preview.7`；包含原生 Doc 默认入口、Ref/Doc 显隐、双列版本图、自适应侧栏、入口生命周期修复、猫头活动栏图标和按工作副本判定的外部写入冲突保护。实际验收与待验证范围见 §8，不代表 Marketplace 发布或全平台兼容承诺。
 >
 > 最新交付：[D016](./decisions.md#d016doc-默认打开与侧栏控制-ref) 已取代概览页默认入口：Doc 默认打开、Ref 按需显示，不使用 Diff 高亮；左侧是 Ref/Doc 双列版本演进图，展示精确 bind 与使用方，不是文件导航树。交互实现见 §4.0，旧版验收保留在 §8.1，新版单独记录。
 >
-> 实现位置：[`adapter/mdv_vscode/`](../../adapter/mdv_vscode/README.md)，独立于根目录的 `@mdv/core` package。
+> 实现位置：[`adapter/mdv_vscode/`](../../adapter/mdv_vscode/README.md)，独立于根目录的 `@owariband/mdv` package。
 >
 > 配套方案：[Agent tool](./agent_tool.md)；进度来源：[路线图](./roadmap.md)；当前 API：[公开接口](../api-reference.md)。
 
@@ -16,7 +16,7 @@
 
 Core 已具备这些底层能力，依据是 [`src/types.ts`](../../src/types.ts)、[`src/mdv-document.ts`](../../src/mdv-document.ts) 及[跨平台验收记录](../compatibility.md)。插件已在本机真实 Extension Host 和隔离安装的 VSIX 中验证，Core CI 与插件验收仍分别记录。
 
-2026-09-08 用户提出尽快实际使用，并将两个上游项目放在 `adapter/`。据此调整原先“正式发布后才启动插件”的排期：可以先锁定已验证的 Core 构建，开发本地预览版；npm scope、License 和商店发布仍单独确认，不提前把 M6 标为正式发布完成。
+2026-09-08 用户提出尽快实际使用，并将两个上游项目放在 `adapter/`。据此调整原先“正式发布后才启动插件”的排期：可以先锁定已验证的 Core 构建，开发本地预览版；当时尚未确定 npm scope、License 和商店发布。2026-09-10 Core 包名与 Apache-2.0 已收口，Marketplace publisher 和实际发布仍需单独确认。
 
 随后用户明确要求保留现有 Markdown plugin 的编辑/显示能力，并复用已有插件渲染。因此首版直接接入 VS Code 原生 Markdown 编辑与预览链路，取代原草案中“另建 Markdown 预览 Webview”的方向。首版自有 Webview 曾展示包概览，现已移除；Core 不增加 Markdown parser 或存储优化。见 [D014](./decisions.md#d014vs-code-复用原生-markdown-编辑与渲染)。
 
@@ -30,7 +30,7 @@ Core 已具备这些底层能力，依据是 [`src/types.ts`](../../src/types.ts
 
 ```text
 mdv/
-├── package.json                 # @mdv/core，继续是根 package
+├── package.json                 # @owariband/mdv，继续是根 package
 ├── src/                         # 仅 Core 源码
 ├── test/                        # 仅 Core 测试
 ├── adapter/                     # 独立上游集合，不是 Core 的一层
@@ -49,14 +49,14 @@ mdv/
 
 这是同仓库的独立包，不是把 CLI/插件变成 Core 内部层次：
 
-- 两个 adapter 都只从 `@mdv/core` package root 导入；不引用 `../../src`、内部 `archive/*`，不复制 ZIP、hash、bind 或锁规则。
+- 两个 adapter 都只从 `@owariband/mdv` package root 导入；不引用 `../../src`、内部 `archive/*`，不复制 ZIP、hash、bind 或锁规则。
 - 插件不依赖 Agent CLI，也不通过启动 CLI 完成 UI 保存；两个上游通过同一份 `.mdv` 和 Core 事务协作。
 - 根 `tsconfig.json` 继续只编译 `src/`，根测试与发布不要求安装 adapter；根 package 不增加 `vscode`、renderer、CLI 参数解析依赖或 `bin`。
 - 根 package 的 `files` 继续使用白名单。`prepare:core` 对真实 tarball 断言 `adapter/**` 未混入 Core 包，不只依赖 `.gitignore`。
 - 首轮各包独立安装、构建、测试和打包，不迁移 Core 到 `packages/core`，也不先引入 npm workspaces 或共享 `adapter/common` 包。需要统一调度时再单独评估。
 - 初次接入从 Core 的真实 `npm pack` 产物安装；联调可用本地包，交付测试必须用独立安装的固定构建，不能依赖开发机源码链接。依赖版本/完整源码 SHA 与产物校验值在 adapter 的构建记录中可追溯。
 
-文件夹名称不是 npm 包名或 Marketplace publisher。当前 VSIX 使用未发布的本地标识 `mdv-local.mdv-vscode`，不代表已注册 Marketplace publisher；仍为 `UNLICENSED`，公开发布身份由 owner 决定。技术隔离不要求立即拆 Git 仓库，将来可以独立迁出。
+文件夹名称不是 npm 包名或 Marketplace publisher。当前 VSIX 使用未发布的本地标识 `mdv-local.mdv-vscode`，不代表已注册 Marketplace publisher；代码与分发包已采用 Apache-2.0，但 Marketplace publisher 仍由 owner 决定。技术隔离不要求立即拆 Git 仓库，将来可以独立迁出。
 
 ## 3. 首版用户功能
 
@@ -175,10 +175,10 @@ src/
 
 ### 5.2 普通保存
 
-1. 取得该编辑区建立时的文档身份与 generation 基线，使用编辑器提供的待保存正文。
+1. 取得该编辑区建立时的文档身份、generation 与该侧工作副本内容指纹基线，使用编辑器提供的待保存正文。
 2. 同一包的插件内写操作顺序执行，调用对应 `save*`；跨进程互斥仍交给 Core，不新增磁盘锁。
 3. 成功后消费返回的新 `MdvDocument`，更新已保存树的基线和状态；不要继续用旧对象假装代表最新磁盘。
-4. 同时打开 Ref/Doc 且两边都有编辑时，本会话成功保存一边后，只有确认另一边的磁盘来源未变化，才推进它的 generation 基线，保留其内存编辑。这是本会话顺序保存的协调，不是外部冲突自动合并。
+4. 同时打开 Ref/Doc 且两边都有编辑时，本会话成功保存一边后，只有确认另一边的磁盘正文未变化，才推进它的 generation 基线，保留其内存编辑。外部事务也按同一规则处理：包 generation 变化但该侧 `current.md` 的 byte length + SHA-256 未变化时，可以把该侧基线推进到最新 generation；该侧正文变化时必须阻止陈旧保存。这是按工作副本识别冲突，不是正文自动合并，也不改变 Core 的整包 CAS/锁边界。
 5. `CONFLICT` 时保留 buffer，提示先用原生编辑器复制/导出，再显式重新加载；首版没有专用合并或比较对话框。禁止为了让保存成功，先重开最新包、拿新 generation 盲目重试旧内容。
 
 虚拟文件的 mtime 根据该正文 bytes 变化推进，不直接使用包 generation；保存 Ref 不能仅因为包 generation 增加，就让未变化的 Doc 被原生编辑器误判为磁盘修改。
@@ -200,11 +200,11 @@ src/
 监听真实包所在目录以覆盖原子替换，并在重新聚焦或显式刷新时重新核对包状态；事件只是提示，不假定文件监听永不丢事件。自身写入事件按返回的身份/generation 核对，不用固定时间窗口屏蔽所有通知。
 
 - 没有未保存编辑：重开包、更新虚拟文件内容和元数据、发出变更事件，刷新预览与版本列表。
-- 有未保存编辑：保留旧保存基线，标记磁盘已变化；不能给旧 buffer 换上新 generation。首版保守提示冲突，不做跨进程自动合并。
+- 有未保存编辑：先比较该侧持久化的正文指纹。只有该侧 `current.md` 也变化时才保留旧基线并标记冲突；若变化只发生在另一侧、历史元数据或资源，则推进到新 generation，继续保留且允许保存内存 buffer。不能只因整包 generation 变化就锁住两侧，也不能在该侧正文已变化时盲目换 generation。
 - 文件删除、移动或同一路径换成另一 documentId：保留现有 buffer，但停止对旧目标自动保存，要求重新选择目标。
 - `details.committed: true`：先重开确认磁盘结果再更新 UI，不将其当作安全重试信号。锁或临时文件不由插件自动强制删除。
 - 原生编辑器的关闭提示、undo/redo、reload/hot exit 必须在 Extension Host 中实测。插件恢复保存基线所需的身份/generation 元数据可以放在扩展存储中，不放进 `.mdv`；正文备份交给 VS Code。
-- 恢复出的 buffer 若缺少可靠基线，先保留为待确认内容并阻止覆盖保存，不能用启动时刚读到的 generation 冒充原基线。多窗口分别是独立 writer，继续由 Core CAS 决定胜者。
+- 恢复出的 buffer 若缺少可靠的该侧内容指纹，先保留为待确认内容并阻止覆盖保存，不能用启动时刚读到的 generation 冒充原基线。若指纹证明该侧未变，即使另一侧推进了 generation，也可以在当前包快照上恢复该侧基线。多窗口分别是独立 writer，最终仍由 Core CAS 决定胜者。
 
 ## 6. 图片与渲染安全
 
@@ -268,7 +268,7 @@ P0–P3 的代码与本地 VSIX 已交付，当前定位是可安装的桌面本
 - 隐藏的 Doc 遇到外部 writer 后，展开仍保留原文并拒绝陈旧保存，不用新 generation 重新绑定旧草稿。
 - 真实侧栏 DOM 验证完整 parent 分支（包含非 HEAD 分支）、两列 HEAD、多对一绑定、全部反向使用方、高亮、unbound、精确历史打开/绑定来源、Ref 草稿状态与多包切换。图浏览前后包 bytes 一致。摘要 HTML 不执行，越包消息和非白名单命令被拒绝；CSP 没有因测试而放宽。
 - 原有图片自然宽度、表格、第三方 markdown-it/CSS、Markdown All in One 编辑、commit/restore 对话框、外部 clean/dirty 和包替换保护继续通过。
-- 两种真实窗口 reload 都从空文件开始，包含前台 Doc 与后台隐藏 Ref 的未保存正文。无外部变化时两侧恢复后可以依次保存；外部 writer 已保存时两侧陈旧写入均被拒绝。Restricted Mode 允许只读打开，写入口保持禁止。
+- 两种真实窗口 reload 都从空文件开始，包含前台 Doc 与后台隐藏 Ref 的未保存正文。无外部变化时两侧恢复后可以依次保存；外部 writer 已保存 Doc 时，恢复的 Doc 陈旧写入被拒绝，磁盘未变化的 Ref 仍可保存。Restricted Mode 允许只读打开，写入口保持禁止。
 - 完整验收必须使用 `--installed`：VS Code 标准 development test runner 禁用 modal 对话框。侧栏 DOM 测试先连接调试器，再恢复侧栏，使测试附着到实际 OOPIF；测试不以截图可见代替点击断言。
 
 测试脚本将 `test-results.json`、`lifecycle-result.json`、`version-graph.png` 与 Markdown 预览截图保留在输出的隔离临时目录。上述结果不是最低版本/Windows/Linux 运行时或大型历史性能结论；当前完整 SVG 图尚未虚拟化。活动栏 SVG 使用宿主主题，Marketplace 位图和发布身份仍未决定。
@@ -286,6 +286,12 @@ P0–P3 的代码与本地 VSIX 已交付，当前定位是可安装的桌面本
 测试 runner 新增可选 `--agent-cli <已安装的 cli.cjs>`，同时传入实际 Node 路径。新增用例启动真实子进程，读取已提交 Ref 和当前 Doc，再保存 Doc；无未保存编辑时原生编辑器刷新，有人的未保存编辑时仍保留文本并拒绝旧基线覆盖，Ref、HEAD、版本均不变。没有修改插件生产代码或 Core。
 
 该新增用例已通过，使用仓库外安装的 `@mdv/agent-tool`，不是直接调用 Core 冒充 CLI。完整运行最新为 **20/21 通过**：原生撤销用例连续复现失败，不能宣称整套通过；另一个缩放断言经截图确认忽略了原生竖滚动条占用，已改为比较实际 viewport 可用宽度，修正后通过。撤销问题及复现路径见 [O006](./open-questions.md#o006原生撤销回归在-agent-联合检查中失败)。旧版通过记录是当时环境的结果，不覆盖本次失败。
+
+### 8.5 preview.7 工作副本级冲突判定（2026-09-10）
+
+`preview.6` 只持久化整包 generation：Agent 保存 Doc 后，即使 Ref 的磁盘正文完全未变，dirty Ref 也会被标成 stale。`preview.7` 在 VS Code 会话层为 Ref/Doc 分别持久化 `contentBytes + contentSha256`，外部 generation 变化时只锁住正文实际变化的那一侧；Core 的整包 generation CAS、跨进程锁和原子替换保持不变。
+
+新增安装版用例双向验证“外部保存 Doc + dirty Ref”和“外部保存 Ref + dirty Doc”均可继续保存，同时既有同侧前台/隐藏 dirty 冲突用例仍通过。真实窗口 `--recovery` 验证外部变化的 Doc 被拒绝、未变化的恢复 Ref 可保存，`--empty-recovery` 与 Restricted Mode 也通过。完整安装套件中的本次冲突用例均通过；套件其余仍有 3 项 CDP 连接返回 403、2 项原生 undo 行为失败，因此不把该次运行记作全套通过。
 
 ## 9. 本地分发与后续范围
 

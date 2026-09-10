@@ -1,7 +1,7 @@
 import { basename } from 'node:path'
 import { stat } from 'node:fs/promises'
 import * as vscode from 'vscode'
-import { createMdv, verifyMdv, type ContentSpec, type MdvDocument, type TreeKind, type VersionSummary } from '@mdv/core'
+import { createMdv, verifyMdv, type ContentSpec, type MdvDocument, type TreeKind, type VersionSummary } from '@owariband/mdv'
 import { DocumentSessions } from './document-session.js'
 import { readResourceFile } from './file-system.js'
 import { parseSource, requireLocalPackage, sourceUri } from './uri.js'

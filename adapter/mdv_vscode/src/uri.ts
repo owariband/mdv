@@ -1,6 +1,6 @@
 import { posix } from 'node:path'
 import * as vscode from 'vscode'
-import type { ContentSpec, DocumentId } from '@mdv/core'
+import type { ContentSpec, DocumentId } from '@owariband/mdv'
 
 export interface MdvSource {
   readonly packageUri: vscode.Uri

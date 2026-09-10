@@ -1,13 +1,26 @@
+import { createHash } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import * as vscode from 'vscode'
-import { MdvError, openMdv, type DocumentId, type MdvDocument } from '@mdv/core'
+import { MdvError, openMdv, type DocumentId, type MdvDocument } from '@owariband/mdv'
 import { parseSource, requireLocalPackage, requireSource, sourceKey, sourceUri } from './uri.js'
+
+interface ContentIdentity {
+  contentBytes: number
+  contentSha256: string
+}
 
 interface Baseline {
   generation: number
+  contentBytes: number
+  contentSha256: string
   blocked: boolean
   readonly restored: boolean
+}
+
+interface PersistedBaseline extends ContentIdentity {
+  generation: number
+  blocked?: boolean
 }
 
 export class DocumentSession {
@@ -45,6 +58,13 @@ export class DocumentSessions implements vscode.Disposable {
           baseline.blocked = true
           await this.persist(sourceKey(document.uri), baseline)
           this.report(new Error('Recovered MDV edits have no reliable save baseline. Export the text or explicitly reload before saving.'))
+        } else if (!recoveredDirty && baseline && !baseline.restored) {
+          const identity = contentIdentity((await session.document.readContent(source.content)).bytes)
+          baseline.generation = session.document.manifest.generation
+          baseline.contentBytes = identity.contentBytes
+          baseline.contentSha256 = identity.contentSha256
+          baseline.blocked = false
+          await this.persist(sourceKey(document.uri), baseline)
         }
       })).catch(report)
     }
@@ -113,11 +133,15 @@ export class DocumentSessions implements vscode.Disposable {
       if (establishBaseline && source.content.kind === 'working-copy') {
         const key = sourceKey(uri)
         if (!session.baselines.has(key)) {
-          const stored = this.state.get<{ generation: number; blocked?: boolean }>(`baseline:${key}`)
-          const valid = stored && Number.isSafeInteger(stored.generation) && stored.generation >= 0
+          const stored = this.state.get<unknown>(`baseline:${key}`)
+          const identity = contentIdentity(result.bytes)
+          const restored = isPersistedBaseline(stored) && sameContent(stored, identity)
+          const recoveredDirty = vscode.workspace.textDocuments.find((document) => sourceKey(document.uri) === key)?.isDirty === true
           const baseline: Baseline = {
-            generation: valid ? stored.generation : session.document.manifest.generation,
-            blocked: Boolean(stored && (!valid || stored.blocked)), restored: Boolean(valid),
+            generation: session.document.manifest.generation,
+            ...identity,
+            blocked: recoveredDirty && (!restored || Boolean(stored.blocked)),
+            restored,
           }
           session.baselines.set(key, baseline)
           await this.persist(key, baseline)
@@ -182,13 +206,20 @@ export class DocumentSessions implements vscode.Disposable {
       session.document = next
       const changed: vscode.Uri[] = [session.packageUri]
       for (const [key, baseline] of session.baselines) {
+        const uri = vscode.Uri.parse(key)
+        const source = requireSource(uri)
+        const identity = contentIdentity((await next.readContent(source.content)).bytes)
         const editor = vscode.workspace.textDocuments.find((doc) => sourceKey(doc.uri) === key)
-        if (editor?.isDirty || baseline.blocked) {
-          if (!baseline.blocked) this.report(new Error('The MDV file changed outside this editor. Unsaved text is kept; compare or export it before explicitly reloading.'))
+        if (baseline.blocked) {
+          // Explicit reload is the only operation that clears a known conflict.
+        } else if (editor?.isDirty && !sameContent(baseline, identity)) {
+          this.report(new Error(`The MDV ${source.content.tree} working copy changed outside this editor. Unsaved text is kept; compare or export it before explicitly reloading.`))
           baseline.blocked = true
         } else {
           baseline.generation = next.manifest.generation
-          changed.push(vscode.Uri.parse(key))
+          baseline.contentBytes = identity.contentBytes
+          baseline.contentSha256 = identity.contentSha256
+          if (!editor?.isDirty) changed.push(uri)
         }
         await this.persist(key, baseline)
       }
@@ -201,7 +232,13 @@ export class DocumentSessions implements vscode.Disposable {
     const session = await this.get(source.packageUri, source.documentId)
     await this.refresh(session)
     await session.run(async () => {
-      const baseline: Baseline = { generation: session.document.manifest.generation, blocked: false, restored: false }
+      const identity = contentIdentity((await session.document.readContent(source.content)).bytes)
+      const baseline: Baseline = {
+        generation: session.document.manifest.generation,
+        ...identity,
+        blocked: false,
+        restored: false,
+      }
       session.baselines.set(sourceKey(uri), baseline)
       await this.persist(sourceKey(uri), baseline)
       this.#events.fire([uri, session.packageUri])
@@ -264,7 +301,11 @@ export class DocumentSessions implements vscode.Disposable {
     for (const [key, baseline] of session.baselines) {
       // Only our successful CAS proves that the other working copy has not changed externally.
       if (!baseline.blocked && baseline.generation === previousGeneration) {
+        const source = requireSource(vscode.Uri.parse(key))
+        const identity = contentIdentity((await next.readContent(source.content)).bytes)
         baseline.generation = next.manifest.generation
+        baseline.contentBytes = identity.contentBytes
+        baseline.contentSha256 = identity.contentSha256
         await this.persist(key, baseline)
       }
     }
@@ -282,7 +323,12 @@ export class DocumentSessions implements vscode.Disposable {
   }
 
   private persist(key: string, baseline: Baseline): Thenable<void> {
-    return this.state.update(`baseline:${key}`, { generation: baseline.generation, blocked: baseline.blocked })
+    return this.state.update(`baseline:${key}`, {
+      generation: baseline.generation,
+      contentBytes: baseline.contentBytes,
+      contentSha256: baseline.contentSha256,
+      blocked: baseline.blocked,
+    })
   }
 
   private collect(session: DocumentSession): void {
@@ -294,4 +340,24 @@ export class DocumentSessions implements vscode.Disposable {
       this.#sessions.delete(session.packageUri.toString())
     }
   }
+}
+
+function contentIdentity(bytes: Uint8Array): ContentIdentity {
+  return {
+    contentBytes: bytes.byteLength,
+    contentSha256: createHash('sha256').update(bytes).digest('hex'),
+  }
+}
+
+function sameContent(left: ContentIdentity, right: ContentIdentity): boolean {
+  return left.contentBytes === right.contentBytes && left.contentSha256 === right.contentSha256
+}
+
+function isPersistedBaseline(value: unknown): value is PersistedBaseline {
+  if (!value || typeof value !== 'object') return false
+  const baseline = value as Record<string, unknown>
+  return Number.isSafeInteger(baseline.generation) && (baseline.generation as number) >= 0
+    && Number.isSafeInteger(baseline.contentBytes) && (baseline.contentBytes as number) >= 0
+    && typeof baseline.contentSha256 === 'string' && /^[0-9a-f]{64}$/.test(baseline.contentSha256)
+    && (baseline.blocked === undefined || typeof baseline.blocked === 'boolean')
 }

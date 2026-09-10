@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { promisify } from 'node:util'
 import * as vscode from 'vscode'
 import { chromium, type Frame } from 'playwright-core'
-import { createMdv, openMdv, verifyMdv, type ContentSpec } from '@mdv/core'
+import { createMdv, openMdv, verifyMdv, type ContentSpec } from '@owariband/mdv'
 import { imageResourceUri, parseImageResource, parseSource, sourceUri } from '../src/uri.js'
 import { layoutVersions } from '../src/version-graph.js'
 
@@ -260,6 +260,40 @@ export async function run(): Promise<void> {
     await assert.rejects(Promise.resolve(vscode.workspace.fs.writeFile(docUri, Buffer.from(document!.getText()))))
     assert.equal(await (await openMdv(file.fsPath)).readDocumentText(), '# Agent winner\n')
     await vscode.commands.executeCommand('workbench.action.files.revert')
+  })
+
+  await check('external Ref and Doc changes keep the untouched dirty working copy saveable', async () => {
+    const target = vscode.Uri.file(join(workspace, 'independent-working-copies.mdv'))
+    const initial = await createMdv(target.fsPath)
+    const referenceUri = sourceUri(target, initial.manifest.documentId, { tree: 'reference', kind: 'working-copy' })
+    const documentUri = sourceUri(target, initial.manifest.documentId, { tree: 'document', kind: 'working-copy' })
+    const reference = await vscode.workspace.openTextDocument(referenceUri)
+    const document = await vscode.workspace.openTextDocument(documentUri)
+    await vscode.window.showTextDocument(reference, { viewColumn: vscode.ViewColumn.One, preview: false })
+    await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Two, preview: false })
+
+    await replace(reference, '# Unsaved Ref draft\n')
+    let writer = await openMdv(target.fsPath)
+    await writer.saveDocument({ markdown: '# External Doc\n', expectedGeneration: writer.manifest.generation })
+    await until(() => document.getText() === '# External Doc\n', 'external Doc refresh while Ref is dirty')
+    assert.equal(reference.isDirty, true)
+    assert.equal(reference.getText(), '# Unsaved Ref draft\n')
+    assert.equal(await reference.save(), true)
+
+    await replace(document, '# Unsaved Doc draft\n')
+    writer = await openMdv(target.fsPath)
+    await writer.saveReference({ markdown: '# External Ref\n', expectedGeneration: writer.manifest.generation })
+    await until(() => reference.getText() === '# External Ref\n', 'external Ref refresh while Doc is dirty')
+    assert.equal(document.isDirty, true)
+    assert.equal(document.getText(), '# Unsaved Doc draft\n')
+    assert.equal(await document.save(), true)
+
+    const saved = await openMdv(target.fsPath)
+    assert.equal(await saved.readReferenceText(), '# External Ref\n')
+    assert.equal(await saved.readDocumentText(), '# Unsaved Doc draft\n')
+    assert.deepEqual(saved.referenceTree, initial.referenceTree)
+    assert.deepEqual(saved.documentTree, initial.documentTree)
+    assert.deepEqual(saved.listVersions(), initial.listVersions())
   })
 
   await check('managed and ordinary images resolve through the actual filesystem provider', async () => {
@@ -781,8 +815,11 @@ async function recovery(workspace: string): Promise<void> {
       return
     }
     await assert.rejects(Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(document.getText()))))
-    await assert.rejects(Promise.resolve(vscode.workspace.fs.writeFile(reference.uri, Buffer.from(reference.getText()))))
-    assert.equal(await (await openMdv(stored.file)).readDocumentText(), '# External winner while editing\n')
-    console.log('PASS actual window reload preserves unsaved text and rejects the stale save baseline')
+    assert.equal(await reference.save(), true)
+    const saved = await openMdv(stored.file)
+    assert.equal(await saved.readDocumentText(), '# External winner while editing\n')
+    assert.equal(await saved.readReferenceText(), '# Recovered hidden Ref\n')
+    assert.equal(saved.listVersions().length, 0)
+    console.log('PASS actual window reload blocks the changed Doc and saves the unchanged recovered Ref')
   }
 }

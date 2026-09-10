@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import * as vscode from 'vscode'
-import { MdvError } from '@mdv/core'
+import { MdvError } from '@owariband/mdv'
 import { DocumentSessions, type DocumentSession } from './document-session.js'
 import { parseImageResource, parseSource, requireSource } from './uri.js'
 

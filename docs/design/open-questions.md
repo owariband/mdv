@@ -26,15 +26,15 @@
 - 错误：非法路径/导入类型为 `INVALID_RESOURCE`，已存内容损坏为 `INTEGRITY_MISMATCH`，超限为 `LIMIT_EXCEEDED`。发布后失败携带 `committed: true`；没有资源 GC 或跨 ZIP/sidecar 事务。
 - 证据：[资源文档](../resources.md)、[D011](./decisions.md#d011m55-区分普通链接与可选受管图片)、`test/resource-*.test.mjs` 与真实跨进程导入测试。跨平台/发布兼容性仍在 M6 验证。
 
-## O003：稳定发布身份
+## O003：稳定发布版本与权限
 
-- 状态：Open
+- 状态：Partially resolved
 - 所属阶段：M6
 - Owner：Repository owner
-- 问题：最终 npm scope、0.1 版本策略、发布权限和开源许可证。
-- 当前阻塞：`package.json` 仍为 `0.0.0-development` 与 `UNLICENSED`，没有 owner 审阅后的 LICENSE。M6 已实现开发态/严格 release gate，严格模式按预期拒绝通过。
+- 已决定：Core npm 包名为 `@owariband/mdv`；仓库、VSIX 与 Agent Tool 采用 Apache-2.0，并包含 Apache 官方许可证正文。该变更不修改 Format 0.1、public API 或运行时语义。
+- 当前阻塞：`package.json` 仍为 `0.0.0-development`，尚未确认 `@owariband` scope 的实际发布权限，也未选择 `0.1.0-rc.1` 或正式 `0.1.0`。严格 release gate 仍按预期拒绝开发版本。
 - 已有证据：干净源码 tarball runtime 与双 TypeScript consumer 已通过，修复提交 `52f1d33` 的三系统矩阵 10/10 成功；见[兼容性证据](../compatibility.md)与[发布检查](../releasing.md)。
-- 下一检查：CI 验收已完成，首次正式发布前由 owner 决定；技术检查不替代 scope 权限或 License 审阅。
+- 下一检查：重新生成两个 Adapter 的固定 Core 产物并完成全量检查；首次正式发布前由 owner 确认 scope 权限和版本。技术检查不替代发布账户授权或代码权利确认。
 
 ## O004：资源随单文件携带
 

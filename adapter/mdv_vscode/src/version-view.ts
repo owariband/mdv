@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { basename } from 'node:path'
 import * as vscode from 'vscode'
-import type { MdvDocument, TreeKind, VersionId } from '@mdv/core'
+import type { MdvDocument, TreeKind, VersionId } from '@owariband/mdv'
 import { DocumentSessions } from './document-session.js'
 import { MdvCommands } from './commands.js'
 import { layoutVersions } from './version-graph.js'

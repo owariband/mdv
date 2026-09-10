@@ -1,6 +1,6 @@
 # 验证与发布检查
 
-当前没有 npm 自动发布 workflow，也没有上传发布凭据。M6 工程检查可运行，但最终 scope、版本和 License 尚待 owner 确认。
+当前没有 npm 自动发布 workflow，也没有上传发布凭据。Core 包名已确定为 `@owariband/mdv`，仓库采用 Apache-2.0；M6 工程检查可运行，但 `@owariband` scope 的实际发布权限和首次版本仍待 owner 确认。
 
 ## 本地验证入口
 
@@ -47,11 +47,11 @@ Windows PowerShell 可以先设置 `$env:MDV_FUZZ_SEED='1'` 和 `$env:MDV_FUZZ_C
 npm run check:release -- --release
 ```
 
-当前该命令应非零退出，明确报告开发版本、`UNLICENSED` 和缺少 `LICENSE`。普通开发态 `check:release` 仍通过并展示这些未决项，防止 License 决策阻塞日常测试。检查会确认 package/lock 身份一致、唯一 ESM export、声明/规范文件存在，以及 lockfile 不包含私有 registry 下载地址。
+当前该命令仍应非零退出，但只因版本为 `0.0.0-development`；Apache-2.0 与 `LICENSE` 已完成。普通开发态 `check:release` 仍通过并展示版本未决项。检查会确认 package/lock 身份一致、唯一 ESM export、声明/规范文件存在，以及 lockfile 不包含私有 registry 下载地址。
 
 首次发布前由 owner 完成：
 
-- 确认最终包名与 npm scope 权限，选择授权方式并提供审阅后的 `LICENSE`；本地检查只能检查文件存在/非空，不负责判断授权文本是否正确。
+- 确认 `@owariband` npm scope 的实际发布权限；包名已经确定为 `@owariband/mdv`，授权方式已经确定为 Apache-2.0，最终发布前仍应由权利人确认授权范围。
 - 选择正式或预发布版本，同步 package/lock，并检查最终 tarball 包含 LICENSE、运行代码、声明和规范；不能把 `0.0.0-development` 当作正式版本。
 - 在待发布提交上确认 [CI](../.github/workflows/ci.yml) 全部结果、平台 skip 原因、安装验证和性能基线；本地脚本不冒充远端 CI 审批。
 - 审阅[兼容策略](./compatibility.md)、[性能边界](./performance.md)和[开发日志](./design/dev_log.md)，记录发布说明及适用平台。

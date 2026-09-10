@@ -48,8 +48,8 @@ try {
   const consumer = join(temporary, 'consumer')
   await cp(join(root, 'test/package-consumer'), consumer, { recursive: true })
   await command([npm, 'install', '--ignore-scripts', '--omit=dev', '--no-package-lock', join(temporary, archive.filename)], consumer)
-  const installed = join(consumer, 'node_modules/@mdv/core')
-  assert.equal(await realpath(installed), join(await realpath(consumer), 'node_modules/@mdv/core'))
+  const installed = join(consumer, 'node_modules/@owariband/mdv')
+  assert.equal(await realpath(installed), join(await realpath(consumer), 'node_modules/@owariband/mdv'))
   const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
   assert.deepEqual(Object.keys(manifest.exports), ['.'])
   // Runtime must work before installing a compiler or development dependencies.

@@ -94,7 +94,7 @@ Document 绑定的 Reference 可以落后于 Reference Head。`getStatus()` 会�
 Core 保存和返回原始 UTF-8 Markdown 字节，不生成 AST 或 HTML，也不重新格式化正文：
 
 ```text
-.mdv -> @mdv/core -> Markdown bytes/text + baseDirectory -> 宿主 renderer
+.mdv -> @owariband/mdv -> Markdown bytes/text + baseDirectory -> 宿主 renderer
 ```
 
 因此 VS Code、MarkText、remark 等工具只需要 adapter，不需要让 Core 兼容它们各自的内部 model。

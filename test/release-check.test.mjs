@@ -17,6 +17,8 @@ test('release gates distinguish development, missing decisions and a prepared pa
     await mkdir(dirname(join(root, path)), { recursive: true })
     await writeFile(join(root, path), '// synthetic gate fixture; not a release artifact\n')
   }
+  manifest.license = 'UNLICENSED'
+  lock.packages[''].license = manifest.license
   await saveMetadata()
   assert.equal(run().status, 0)
   const blocked = run('--release')
@@ -25,7 +27,7 @@ test('release gates distinguish development, missing decisions and a prepared pa
   assert.match(blocked.stderr, /Owner must choose the distribution license/)
   assert.match(blocked.stderr, /LICENSE file is required/)
 
-  // Only synthetic data inside this temporary fixture; no repository license/version choice.
+  // Only synthetic data inside this temporary fixture; no repository version choice.
   manifest.version = '0.1.0-test'
   manifest.license = 'SEE LICENSE IN LICENSE'
   Object.assign(lock.packages[''], { version: manifest.version, license: manifest.license })

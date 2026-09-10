@@ -66,7 +66,7 @@ Markdown 直接保存相对 hash 路径：
 
 ```ts
 import { readFile } from 'node:fs/promises'
-import { openMdv } from '@mdv/core'
+import { openMdv } from '@owariband/mdv'
 
 let mdv = await openMdv('/notes/example.mdv')
 const relativePath = await mdv.importManagedResource({

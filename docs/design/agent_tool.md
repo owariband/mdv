@@ -50,7 +50,7 @@ adapter/mdv_agent_tool/
 └── README.md             # 安装、调用、权限与 Agent 装配说明
 ```
 
-只依赖 `@mdv/core` 的 public API，不导入插件，不引用根源码，不自己解包写 entry；不建立第二套 lock、CAS、hash 或版本图校验。代码量增长后按真实动作拆文件，不先建立 handler/service/repository 多层转调。
+只依赖 `@owariband/mdv` 的 public API，不导入插件，不引用根源码，不自己解包写 entry；不建立第二套 lock、CAS、hash 或版本图校验。代码量增长后按真实动作拆文件，不先建立 handler/service/repository 多层转调。
 
 初始可从 Core tarball 独立安装并固定构建，Node 要求不低于 Core 当前的 `>=20`；正式 npm 身份和版本仍需 owner 确认。根 Core 的构建、测试、发布与 `bin` 保持不变；没有 adapter 时 Core 仍能独立交付。
 
@@ -186,8 +186,8 @@ save、commit、checkout 请求必须携带：
 两个 adapter 都直接调用 Core，互不依赖，不共享内存 buffer：
 
 ```text
-VS Code 编辑区 -> mdv_vscode -----> @mdv/core -> .mdv + sidecar
-Agent Runtime -> mdv_agent_tool -> @mdv/core -> 同一份 .mdv + sidecar
+VS Code 编辑区 -> mdv_vscode -----> @owariband/mdv -> .mdv + sidecar
+Agent Runtime -> mdv_agent_tool -> @owariband/mdv -> 同一份 .mdv + sidecar
 ```
 
 推荐流程：

@@ -4,7 +4,7 @@
 
 ## 运行环境
 
-Core 是 Node.js ESM 库，唯一入口为 `@mdv/core`。不提供 CommonJS `require` 入口、浏览器构建、CLI 或 Markdown renderer。`engines.node` 暂时保留 `>=20`，本轮不通过提高门槛制造不必要的兼容破坏。
+Core 是 Node.js ESM 库，唯一入口为 `@owariband/mdv`。不提供 CommonJS `require` 入口、浏览器构建、CLI 或 Markdown renderer。`engines.node` 暂时保留 `>=20`，本轮不通过提高门槛制造不必要的兼容破坏。
 
 | 环境 | 验证状态 |
 | --- | --- |

@@ -2,7 +2,7 @@
 
 > 状态：项目结构与模型设计草案
 >
-> 适用范围：`@mdv/core` 的 TypeScript 实现、本地文件事务和 Library API
+> 适用范围：`@owariband/mdv` 的 TypeScript 实现、本地文件事务和 Library API
 >
 > 产品语义与文件格式以 [`architecture.md`](./architecture.md) 为准；本文不重复定义另一套格式
 >
@@ -12,7 +12,7 @@
 
 ## 1. 已确定的技术结论
 
-1. `@mdv/core` 是单个 npm package，内部依赖方向为 `public facade -> core -> archive`。
+1. `@owariband/mdv` 是单个 npm package，内部依赖方向为 `public facade -> core -> archive`。
 2. Core 解析的是 MDV 容器、版本图和操作语义，不解析或渲染 Markdown。
 3. Markdown 原始 UTF-8 字节是保真边界，字符串是给编辑器和解析器使用的便利接口。
 4. 不能只把 path 当作 Markdown 交接接口：`.mdv` 有文件路径，但 ZIP 内的 `current.md` 和 `content.md` 没有独立的文件系统路径。
@@ -20,7 +20,7 @@
 6. Core 不兼容或复用 Muya、remark、markdown-it 等库的 AST/model。第三方兼容放在调用方 adapter。
 7. 当前只有 ZIP 一种后端，不提前增加 `Repository`、`Manager`、`ServiceFactory` 或可插拔存储接口。
 8. `mimetype` 条目不进入 0.1；根 `manifest.json` 是格式识别和并发 generation 的入口。
-9. CLI 是独立的上游业务项目，不属于 `@mdv/core` 的源码、发布包或内部层次。
+9. CLI 是独立的上游业务项目，不属于 `@owariband/mdv` 的源码、发布包或内部层次。
 10. Core 不依赖 CLI，也不定义 argv、JSON envelope 或退出码；它只提供足够稳定的 public API 供 CLI、VS Code、MarkText 和其他宿主调用。
 11. 外部受管资源属于 Core 的文件语义：Core 负责内容寻址、相对路径解析、读取、写入和哈希校验；宿主负责 paste/drop、Markdown 插入与渲染。
 12. Public `interface` 只描述调用方实际消费的对象契约；泛型只在能保留真实类型关系或复用同一校验逻辑时使用，不把“库”设计成多层通用框架。
@@ -66,7 +66,7 @@ Core 的主交接方式因此是：
 .mdv path / bytes
         |
         v
-@mdv/core --读取容器--> Markdown bytes / UTF-8 text + baseDirectory
+@owariband/mdv --读取容器--> Markdown bytes / UTF-8 text + baseDirectory
                                       |
                                       v
                          VS Code / MarkText adapter / 其他 parser
@@ -94,7 +94,7 @@ LLM 只产生工具调用意图，真正读写文件的是 Agent Runtime。以�
 | --- | --- | --- |
 | 本地 `.md` | 文件系统 read/write/patch | 否 |
 | 本地 `.docx` | DOCX 库或脚本修改 ZIP/XML，并进行渲染校验 | 否 |
-| 本地 `.mdv` | Agent tool 在进程内调用 `@mdv/core`，或执行官方 `mdv` CLI | 否 |
+| 本地 `.mdv` | Agent tool 在进程内调用 `@owariband/mdv`，或执行官方 `mdv` CLI | 否 |
 | 飞书、Google Docs 等云文档 | 调用远端文档 API | 是，由云平台提供而不是本地文件库启动 |
 
 `exec`/shell 只是另一种工具执行方式：它通常启动一次性子进程，命令结束后进程退出。CLI 不等于服务，也不是 Core 修改文件的内部依赖。独立的 `mdv-cli` 上游项目可以把 Core 包装成可安装的 Agent/Human tool，使不方便直接 import TypeScript 的宿主也能安全操作 `.mdv`。
@@ -107,7 +107,7 @@ VS Code / MarkText adapter / TypeScript 宿主 -+
 独立 mdv-cli 项目 -------------------------+
                                            |
                                            v
-                                  @mdv/core public facade
+                                  @owariband/mdv public facade
                                     |               |
                                     v               v
                           core（版本用例）     resource/model（图片规则）
@@ -126,7 +126,7 @@ VS Code / MarkText adapter / TypeScript 宿主 -+
 - `archive/` 不导入 public facade 或 `core/`，只处理格式 DTO、字节、路径和事务；
 - `resource/` 不导入 public facade、`core/` 或 `archive/`，只处理受管路径、图片 bytes 与 sidecar I/O；
 - `index.ts` 是唯一 public export 入口。
-- 上游 `mdv-cli` 只能依赖 `@mdv/core` 的公开 package export，不能导入 `core/` 或 `archive/` 内部路径。
+- 上游 `mdv-cli` 只能依赖 `@owariband/mdv` 的公开 package export，不能导入 `core/` 或 `archive/` 内部路径。
 
 这是一套务实的三层实现，不是为了“分层”增加空转接口。等真正出现浏览器存储或远端存储的第二个实现，再从已经稳定的读写边界提取最小 port。
 
@@ -184,7 +184,7 @@ CLI 不校验版本图、不拼 ZIP entry、不直接获得锁，也不复制 sa
 
 ## 4. 项目目录
 
-当前有根 `@mdv/core` 与独立的 `adapter/mdv_vscode/` 本地预览包，`adapter/mdv_agent_tool/` 尚未实现。不把 adapter 放入 Core `src/` 或发布产物；各自安装/构建/测试，不使用 workspace、不迁移到 `packages/`：
+当前有根 `@owariband/mdv` 与独立的 `adapter/mdv_vscode/` 本地预览包，`adapter/mdv_agent_tool/` 尚未实现。不把 adapter 放入 Core `src/` 或发布产物；各自安装/构建/测试，不使用 workspace、不迁移到 `packages/`：
 
 ```text
 mdv/
@@ -282,7 +282,7 @@ mdv/
 
 ```json
 {
-  "name": "@mdv/core",
+  "name": "@owariband/mdv",
   "exports": {
     ".": "./dist/index.js"
   }
@@ -293,12 +293,12 @@ mdv/
 
 ```text
 mdv repository
-  根 package @mdv/core
+  根 package @owariband/mdv
     -> Core 独立构建与发布
   adapter/mdv_vscode
-    -> 依赖 @mdv/core -> VSIX -> VS Code 用户
+    -> 依赖 @owariband/mdv -> VSIX -> VS Code 用户
   adapter/mdv_agent_tool
-    -> 依赖 @mdv/core -> CLI -> Agent Runtime / 人类终端
+    -> 依赖 @owariband/mdv -> CLI -> Agent Runtime / 人类终端
 ```
 
 ## 5. 模型边界：DTO、领域模型与第三方模型
@@ -879,7 +879,7 @@ M5 也不修改 `package.json` 的 runtime dependencies：bounded Myers 保持�
 
 - **M5 Agent-friendly 审阅与诊断原语**：完成 `readContent`、dirty/Reference relation、受限源码 Diff 和顶层完整性诊断。此时 Agent 和自动化工具已能不依赖 UI 完成结构化审阅，但 Core 不提供人类 Review UI，也不宣称图片导入和正式发布闭环；
 - **M5.5 受管资源闭环**：按 [`resources.md`](../resources.md) 实现 `.mdv-assets/<documentId>/<sha256>.<extension>` 的 hash 计算、安全扩展名、原子写入/复用、相对路径返回、resolve/read 和读取时 hash 校验。它不增加 ZIP entry、不修改 manifest generation、不扫描 Markdown AST、不做网络下载或资源 GC；paste/drop、插入 Markdown 和渲染仍由宿主负责；
-- **M6 稳定发布闭环**：不再引入主要版本业务语义，集中完成安全 fixtures、fuzz、复杂 Markdown round-trip、性能基准、Node CI matrix、tarball consumer CI、npm 包名/scope、License、0.1 版本策略以及 public API/错误码/Format 兼容承诺。M6 验收后才把 `@mdv/core 0.1` 定义为可正式依赖的完整形态。
+- **M6 稳定发布闭环**：不再引入主要版本业务语义，集中完成安全 fixtures、fuzz、复杂 Markdown round-trip、性能基准、Node CI matrix、tarball consumer CI、npm 包名/scope、License、0.1 版本策略以及 public API/错误码/Format 兼容承诺。M6 验收后才把 `@owariband/mdv 0.1` 定义为可正式依赖的完整形态。
 
 M5.5 的资源 sidecar 是独立文件事务，不复用 `.mdv` 整包 transaction，也不把资源 bytes 伪装成 Markdown Version。M6 若基准数据证明整包重写不满足目标，再为后续格式版本立项；不能在 M5/M5.5 中提前引入增量容器或 Repository 框架。
 
@@ -1041,7 +1041,7 @@ Core 只保证它需要的底层能力完整且稳定：
 
 `mdv-cli` 可以把这些 API 组织成人类命令和 Agent tool，但必须遵守 Core 的 `expectedGeneration`、nullable reference bind、稳定错误码和只读历史约束。CLI 不能通过解包后直接改 entry 来绕过 Core。
 
-Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行行为。CLI 项目应基于它锁定的 `@mdv/core` 版本独立完成命令 contract 和端到端测试。
+Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行行为。CLI 项目应基于它锁定的 `@owariband/mdv` 版本独立完成命令 contract 和端到端测试。
 
 ## 10. 一致性规则的唯一归属
 
@@ -1104,7 +1104,7 @@ Core 不导出 CLI DTO，不关心 stdout/stderr，也不测试具体命令行�
 
 ## 12. 实现顺序
 
-1. 初始化单包 `@mdv/core`，配置 Library export，只建立当前用得到的文件。
+1. 初始化单包 `@owariband/mdv`，配置 Library export，只建立当前用得到的文件。
 2. 冻结 `spec/format-0.1.md`、三个 Schema 和最小合法/非法 fixtures。
 3. 实现 archive 只读入口、格式 DTO 和资源限制。
 4. 实现 Core hydrate、invariants、索引与 trace 查询。

@@ -2,7 +2,7 @@ import {
   createMdv, openMdv, parseMdv, verifyMdv, MdvError,
   type DocumentSnapshot, type LocatedDocumentSnapshot, type MdvDocument,
   type DocumentVersionSummary, type ReferenceVersionSummary, type MdvErrorCode,
-} from '@mdv/core'
+} from '@owariband/mdv'
 
 // Compile-only consumer: no ambient Node types or repository path aliases.
 const document: MdvDocument = await createMdv('/example.mdv')
@@ -39,4 +39,4 @@ document.commitDocument({ expectedGeneration: 0, actor: { type: 'human' }, summa
 // @ts-expect-error writes require compare-and-swap generation
 document.saveDocument({ markdown: '' })
 // @ts-expect-error internal files are not public package exports
-await import('@mdv/core/dist/archive/reader.js')
+await import('@owariband/mdv/dist/archive/reader.js')

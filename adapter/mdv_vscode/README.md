@@ -2,14 +2,14 @@
 
 Local preview extension for `.mdv`: edit Reference and Document as native Markdown documents, preview them with your existing Markdown renderer, and keep explicitly committed, traceable versions.
 
-This is an independent adapter of [`@mdv/core`](../../README.md). It does not implement another Markdown renderer, ZIP writer, Agent runtime or server. `mdv-local` is an unpublished local extension identifier, not a claimed Marketplace publisher. This project is currently `UNLICENSED`; public distribution requires the owner's licensing decision.
+This is an independent adapter of [`@owariband/mdv`](../../README.md). It does not implement another Markdown renderer, ZIP writer, Agent runtime or server. `mdv-local` is an unpublished local extension identifier, not a claimed Marketplace publisher. This project is licensed under [Apache-2.0](LICENSE); public Marketplace distribution still requires the owner's publisher decision.
 
 ## Install the local VSIX
 
-In VS Code, run **Extensions: Install from VSIX…** and select `dist/mdv-vscode-0.1.0-preview.6.vsix`. Alternatively:
+In VS Code, run **Extensions: Install from VSIX…** and select `dist/mdv-vscode-0.1.0-preview.7.vsix`. Alternatively:
 
 ```sh
-code --install-extension adapter/mdv_vscode/dist/mdv-vscode-0.1.0-preview.6.vsix
+code --install-extension adapter/mdv_vscode/dist/mdv-vscode-0.1.0-preview.7.vsix
 ```
 
 Installing does not require a global Node installation or a separately installed Core package. The VSIX contains a bundled, fixed Core build; `dist/core-build.json` records its source commit and npm tarball integrity. Nothing is automatically published or installed by the build.
@@ -79,9 +79,9 @@ Do not move only the `.mdv` and expect external pictures to travel with it: reta
 
 ## Saving and external changes
 
-Saving calls Core with the editor's original document identity and generation. Writes to one package are serialized. Saving Ref does not falsely mark an unchanged Doc file as externally modified; the package generation and the virtual file's modification time serve different purposes.
+Saving calls Core with the editor's document identity and current safe generation baseline. Writes to one package are serialized. Each Ref/Doc baseline also records that working copy's byte length and SHA-256, so saving Ref does not falsely mark an unchanged Doc file as externally modified; the package generation and the virtual file's modification time serve different purposes.
 
-An external writer's changes reload clean editors. Dirty editors keep their text and reject stale saves. Copy/export your edits using normal editor commands before **MDV: Reload Working Copy from Disk…** if you need to reconcile changes. MDV does not force-merge, forcibly remove locks, or take a fresh generation just to overwrite somebody else's work.
+An external writer's changes reload clean editors. A dirty editor keeps its text: if that exact Ref or Doc working copy is unchanged on disk, its baseline advances to the package's latest generation and it remains saveable; if the same working copy changed, saving stays blocked. Copy/export your edits using normal editor commands before **MDV: Reload Working Copy from Disk…** if you need to reconcile a real same-side conflict. MDV does not force-merge, forcibly remove locks, or take a fresh generation just to overwrite somebody else's work.
 
 Native editor backups hold unsaved text; the extension persists only save-baseline metadata in extension storage. A restored buffer without a reliable baseline must not overwrite the package. A failed write can already have reached the Core commit point; inspect/reload the package before retrying. Save and commit, and Save All across Ref/Doc, remain separate transactions.
 
@@ -103,7 +103,7 @@ npm test -- --installed
 npm run package
 ```
 
-`prepare:core` builds a real `npm pack` artifact in the ignored `vendor/` directory, checks that it excludes `adapter/**`, and records provenance. Install consumes that artifact as an ordinary package, not a source symlink. The Core tarball includes its documentation, so editing Core docs also changes its integrity. After regenerating it, run `npm install --save-dev @mdv/core@file:vendor/mdv-core-0.0.0-development.tgz` to refresh the adapter lockfile; use `npm ci` once the generated artifact matches the lock. Build output is bundled CommonJS for the Extension Host; source remains strict TypeScript with ESM imports.
+`prepare:core` builds a real `npm pack` artifact in the ignored `vendor/` directory, checks that it excludes `adapter/**`, and records provenance. Install consumes that artifact as an ordinary package, not a source symlink. The Core tarball includes its documentation, so editing Core docs also changes its integrity. After regenerating it, run `npm install --save-dev @owariband/mdv@file:vendor/owariband-mdv-0.0.0-development.tgz` to refresh the adapter lockfile; use `npm ci` once the generated artifact matches the lock. Build output is bundled CommonJS for the Extension Host; source remains strict TypeScript with ESM imports.
 
 Open this adapter folder in VS Code, build, then use the included **Run MDV Extension** debug configuration. No root workspace conversion is required.
 
@@ -116,7 +116,7 @@ npm test -- --vscode "/path/to/VS Code executable" --recovery
 npm test -- --vscode "/path/to/VS Code executable" --empty-recovery
 ```
 
-`--installed`, `--restricted`, `--recovery` and `--empty-recovery` freshly package and install the VSIX in that isolated profile; they do not use a source-linked development extension. Use `--installed` for the full suite: VS Code's standard development test runner disables the modal dialogs exercised by commit/restore checks. Both recovery modes reload the real window with unsaved Doc and a hidden Ref from a new empty file: `--empty-recovery` verifies successful saves after recovery, while `--recovery` verifies that an external writer's first save cannot be overwritten by either recovered old baseline. For example, the macOS executable is `/Applications/Visual Studio Code.app/Contents/MacOS/Code`.
+`--installed`, `--restricted`, `--recovery` and `--empty-recovery` freshly package and install the VSIX in that isolated profile; they do not use a source-linked development extension. Use `--installed` for the full suite: VS Code's standard development test runner disables the modal dialogs exercised by commit/restore checks. Both recovery modes reload the real window with unsaved Doc and a hidden Ref from a new empty file: `--empty-recovery` verifies successful saves after recovery, while `--recovery` verifies that an externally changed Doc cannot be overwritten and that the unchanged recovered Ref remains saveable. For example, the macOS executable is `/Applications/Visual Studio Code.app/Contents/MacOS/Code`.
 
 Test profiles, JSON results and screenshots are retained under the printed temporary path for diagnosis. The test runner enables a loopback-only debugging port to inspect actual preview DOM, loaded images and contributed CSS. It never uses your normal VS Code profile. See the [maintainer plan and acceptance record](../../docs/design/vscode_plugin.md) for completed and still-pending checks.
 

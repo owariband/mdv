@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { createMdv, openMdv, verifyMdv } from '@mdv/core'
+import { createMdv, openMdv, verifyMdv } from '@owariband/mdv'
 
 const cli = process.env.MDV_AGENT_CLI ?? fileURLToPath(new URL('../dist/cli.cjs', import.meta.url))
 const workingDirectory = process.env.MDV_AGENT_TEST_CWD ?? process.cwd()

@@ -1,4 +1,4 @@
-import type { VersionSummary } from '@mdv/core'
+import type { VersionSummary } from '@owariband/mdv'
 
 export interface VersionNode {
   readonly version: VersionSummary

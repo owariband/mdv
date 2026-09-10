@@ -177,3 +177,12 @@
 - 边界：这是 adapter 能力约束，不修改 Core 的通用两树写 API、文件格式或宿主的人类权限。具有任意 shell/文件写能力的 Agent 仍需宿主级沙箱约束；工具本身不是 OS 权限系统。
 - 取代：原 Agent 草案 A1 的“两树 save”和默认一律 JSON 输出；改为默认可读两段文本、可选精确 JSON。其他命令仍是待另行授权的后续设计。
 - 证据：[实现与安装](../../adapter/mdv_agent_tool/README.md)、[真实子进程回归](../../adapter/mdv_agent_tool/test/cli.test.mjs)、[方案](./agent_tool.md)。19 项 Node 20/26 及独立安装检查通过；CLI → VS Code 新增用例通过，完整 UI 剩余失败单独记 O006。
+
+## D018：发布包使用 `@owariband/mdv` 与 Apache-2.0
+
+- 日期：2026-09-10
+- 状态：Accepted / Implemented；实际发布权限和版本仍见 O003。
+- 决定：根 Core 包从未发布的开发名 `@mdv/core` 改为 `@owariband/mdv`，整个仓库、VSIX 与 Agent Tool 采用 Apache License 2.0。两个 Adapter 继续保持独立包身份，但统一从新的 Core package root 导入，并在分发物中携带许可证正文。
+- 理由：发布身份必须落在 owner 控制的 namespace 下；在首次公开版本前完成改名不会产生已发布调用方迁移。Apache-2.0 为源码与二进制分发提供统一、明确的授权文本。
+- 影响：同步 package/lock、调用方 import、Adapter 固定 tarball、构建校验和当前用户文档；Format 0.1、public API 形状、运行时行为、错误码和版本历史均不改变。D006/D013 与开发日志中的 `@mdv/core` 保留为当时开发名的历史事实，由本决策取代其发布名称。
+- 未决：确认 `@owariband` npm scope 的发布权限、VS Code Marketplace publisher，以及首次使用 `0.1.0-rc.1` 还是直接 `0.1.0`。

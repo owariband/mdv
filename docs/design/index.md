@@ -8,11 +8,11 @@
 
 ## 当前综合结论
 
-MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@mdv/core` 已完成 M5.5 产品能力；M6 已补充 conformance/安全/复杂 Markdown/fuzz、干净源码 tarball consumer、性能基线、CI 与发布 gate，未修改公开 API 或生产分层。修复提交 `52f1d33` 已通过远端 10 组矩阵，证据见[兼容性文档](../compatibility.md)；当前仍为开发预览，owner 发布身份决策和正式发布待验收。
+MDV 0.1 使用 ZIP 单文件保存 Reference/Document 两份工作副本和两棵不可变版本历史。Document Version 单向绑定精确 Reference Version 或 `null`。`@owariband/mdv` 已完成 M5.5 产品能力；M6 已补充 conformance/安全/复杂 Markdown/fuzz、干净源码 tarball consumer、性能基线、CI 与发布 gate，未修改公开 API 或生产分层。修复提交 `52f1d33` 已通过远端 10 组矩阵，证据见[兼容性文档](../compatibility.md)；当前仍为开发预览，owner 发布身份决策和正式发布待验收。
 
 M4 没有增加另一套 Draft 模型：编辑器内存 buffer 归宿主，Core 只持久化 `current.md`，显式 commit 才创建 Version。多进程写冲突由 Core 报告 `CONFLICT`，重载或合并策略仍由宿主决定。
 
-M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务。人类侧 Reference/Document 左右对照的核心仍是 bind + 精确读取，具体 mode 和渲染属于上游插件。M5.5 已补齐可选图片 hash sidecar：普通路径仍由宿主自由管理，受管图片由 Core 导入并返回相对路径，resolve 返回真实本地绝对路径。M6 本地与远端检查通过不等于已经发布；scope/License/版本与发布验收完成后才达到本轮 `@mdv/core 0.1` 稳定发布口径。
+M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务。人类侧 Reference/Document 左右对照的核心仍是 bind + 精确读取，具体 mode 和渲染属于上游插件。M5.5 已补齐可选图片 hash sidecar：普通路径仍由宿主自由管理，受管图片由 Core 导入并返回相对路径，resolve 返回真实本地绝对路径。M6 本地与远端检查通过不等于已经发布；Core 包名已确定为 `@owariband/mdv`，仓库采用 Apache-2.0，剩余 scope 发布权限、版本与发布验收完成后才达到 0.1 稳定发布口径。
 
 2026-09-08 按用户要求进入 U1：[`adapter/mdv_vscode/`](../../adapter/mdv_vscode/README.md) 已实现并产出本地预览 VSIX，复用原生 Markdown 编辑/渲染和兼容扩展，提供 Ref/Doc、图片、显式版本与精确 bind 对照。本机安装版 Extension Host 验证通过，Windows/Linux、最低版本和任意第三方 renderer 仍待验证；详细证据见[插件方案 §8](./vscode_plugin.md#8-开发阶段与验收)。`adapter/mdv_agent_tool/` 仍仅有设计，尚未实现。Core 仍在根 package，adapter 只消费 package root；见 [D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 与 [D014](./decisions.md#d014vs-code-复用原生-markdown-编辑与渲染)。
 

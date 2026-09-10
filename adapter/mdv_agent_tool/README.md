@@ -1,12 +1,12 @@
 # MDV Agent Tool
 
-独立于 `@mdv/core` 和 VS Code 插件的本地工具。一次调用完成一个动作并退出，不启动服务。
+独立于 `@owariband/mdv` 和 VS Code 插件的本地工具。一次调用完成一个动作并退出，不启动服务。
 
 当前 `0.1.0-preview.1` 只开放两项能力：**一起读取 Reference / Document，保存当前 Document 正文**。Reference 和不可变历史只读，保存不产生版本；没有提权开关、自动 commit 或冲突重试。
 
 ## 安装与构建
 
-需要 Node.js 20+。本地安装包自带固定的 Core 构建，不要求用户安装未发布的 `@mdv/core`、VS Code 或本仓库源码。当前为 private / UNLICENSED 开发预览，未发布 npm。
+需要 Node.js 20+。本地安装包自带固定的 Core 构建，不要求用户安装未发布的 `@owariband/mdv`、VS Code 或本仓库源码。当前为 private、采用 [Apache-2.0](LICENSE) 的开发预览，未发布 npm。
 
 在本仓库构建：
 
@@ -22,7 +22,7 @@ npm run package
 首次生成依赖锁时，使用 `npm install --ignore-scripts --registry=https://registry.npmjs.org`。如果重新打包的 Core tarball 完整性改变，在 `prepare:core` 后先显式重装本地包，再运行后续构建/测试：
 
 ```sh
-npm install --ignore-scripts --registry=https://registry.npmjs.org @mdv/core@file:vendor/mdv-core-0.0.0-development.tgz
+npm install --ignore-scripts --registry=https://registry.npmjs.org @owariband/mdv@file:vendor/owariband-mdv-0.0.0-development.tgz
 ```
 
 普通 `npm install` 可能沿用旧的本地包缓存。build 会拒绝记录与已安装 Core 不一致的情况；上述命令不修改全局 npm 配置。

@@ -2,13 +2,13 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import * as api from '@mdv/core'
+import * as api from '@owariband/mdv'
 
 assert.deepEqual(Object.keys(api).sort(), [
   'MDV_FORMAT', 'MDV_FORMAT_VERSION', 'MdvError', 'createMdv', 'openMdv', 'parseMdv', 'verifyMdv',
 ])
 assert.equal(api.MDV_FORMAT_VERSION, '0.1')
-await assert.rejects(import('@mdv/core/dist/archive/reader.js'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' })
+await assert.rejects(import('@owariband/mdv/dist/archive/reader.js'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' })
 const directory = await realpath(await mkdtemp(join(tmpdir(), 'mdv consumer 中文 ')))
 try {
   const emptyPath = join(directory, 'ordinary-new-file.mdv')

@@ -8,7 +8,7 @@
 >
 > 文档属性：维护者设计，包含未来能力；当前可用接口见 [`api-reference.md`](../api-reference.md)
 >
-> 实现进度：M5.5 产品能力与 M6 工程硬化已落地；公开 API 和 Format 0.1 未改变，三系统 CI 的 10 组检查已通过，证据见[兼容性文档](../compatibility.md)。发布身份/License 和正式发布仍待 M6 验收。
+> 实现进度：M5.5 产品能力与 M6 工程硬化已落地；公开 API 和 Format 0.1 未改变，三系统 CI 的 10 组检查已通过，证据见[兼容性文档](../compatibility.md)。Core 发布名已确定为 `@owariband/mdv`，仓库采用 Apache-2.0；版本、发布权限和实际发布仍待 M6 验收。
 
 ## 1. 背景与目标
 
@@ -20,7 +20,7 @@ MDV（Markdown Document with Versions）是一种带版本语义的 Markdown 文
 - 每个成品版本实际依据的精确摘要版本，或明确记录该版本没有摘要依赖；
 - 随时可打开或导出的当前 Markdown 成品。
 
-本项目首先完成独立的 `@mdv/core`。它是 `.mdv` 的官方 TypeScript 参考实现，但不是格式本身的唯一事实来源。语言无关规范、一致性样例和 Schema 与 Core 同级。Core 工程与跨平台验收已通过，按 2026-09-08 的 [D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 规划本地 VS Code/Agent adapter 接入，不再等待 npm 正式发布；MarkText 排在首个客户端验证之后。
+本项目首先完成独立的 `@owariband/mdv`。它是 `.mdv` 的官方 TypeScript 参考实现，但不是格式本身的唯一事实来源。语言无关规范、一致性样例和 Schema 与 Core 同级。Core 工程与跨平台验收已通过，按 2026-09-08 的 [D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 规划本地 VS Code/Agent adapter 接入，不再等待 npm 正式发布；MarkText 排在首个客户端验证之后。
 
 ### 1.1 核心语义
 
@@ -885,7 +885,7 @@ Reader 将 `.mdv` 当作不可信归档处理：
 
 ## 12. 包与模块边界
 
-具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。Core 仍是根目录单个 `@mdv/core` 包，不把内部职责拆成多个 npm package。同仓 `adapter/mdv_vscode/` 已交付本地预览版，Agent tool 仍在规划；不迁移 Core，也不引入 workspace：
+具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。Core 仍是根目录单个 `@owariband/mdv` 包，不把内部职责拆成多个 npm package。同仓 `adapter/mdv_vscode/` 已交付本地预览版，Agent tool 仍在规划；不迁移 Core，也不引入 workspace：
 
 ```text
 mdv/
@@ -949,17 +949,17 @@ mdv/
 所有图形客户端的依赖方向必须保持：
 
 ```text
-VS Code / MarkText -> host adapter -> @mdv/core -> .mdv
+VS Code / MarkText -> host adapter -> @owariband/mdv -> .mdv
 ```
 
 Core 不依赖 VS Code API、Electron、Vue、MarkText store、Muya state 或 Muya AST。宿主 adapter 从 Core 取得 UTF-8 字符串与资源基准，并把编辑后的 Markdown 字符串交回保存 API。
 
 ## 13. 宿主与 Agent 接入
 
-`@mdv/core` 是被宿主进程 import 的库，不启动 HTTP 服务、后台 daemon 或 CLI 进程。VS Code、MarkText 等应用通过各自 adapter 调用 public API：
+`@owariband/mdv` 是被宿主进程 import 的库，不启动 HTTP 服务、后台 daemon 或 CLI 进程。VS Code、MarkText 等应用通过各自 adapter 调用 public API：
 
 ```text
-host UI / editor -> host adapter -> @mdv/core -> example.mdv
+host UI / editor -> host adapter -> @owariband/mdv -> example.mdv
 ```
 
 Agent 本身也不直接触碰磁盘。模型发出工具调用，由 Agent Runtime 中注册的工具执行真正的文件操作：
@@ -967,7 +967,7 @@ Agent 本身也不直接触碰磁盘。模型发出工具调用，由 Agent Runt
 ```text
 Agent model
   -> Agent Runtime 的 MDV tool
-  -> @mdv/core
+  -> @owariband/mdv
   -> example.mdv
 ```
 

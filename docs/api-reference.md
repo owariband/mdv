@@ -1,13 +1,13 @@
 # 当前 API 参考
 
-本页只记录当前从 `@mdv/core` package root 导出的公开 API。M5.5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片；M6 没有改变这些 API。安装验证、默认预算与平台验证状态见[兼容性](./compatibility.md)；正式 npm 发布尚未完成。
+本页只记录当前从 `@owariband/mdv` package root 导出的公开 API。M5.5 已提供创建、读取、工作副本保存、commit、checkout、结构化 status、统一内容选择、通用源码 Diff、完整性诊断与受管图片；M6 没有改变这些 API。安装验证、默认预算与平台验证状态见[兼容性](./compatibility.md)；正式 npm 发布尚未完成。
 
 ## 运行环境与入口
 
 - Node.js 20+；
 - ESM；
-- 唯一公开入口：`@mdv/core`；
-- 不支持从 `@mdv/core/archive/*`、`@mdv/core/core/*` 或 `@mdv/core/resource/*` 导入内部模块。
+- 唯一公开入口：`@owariband/mdv`；
+- 不支持从 `@owariband/mdv/archive/*`、`@owariband/mdv/core/*` 或 `@owariband/mdv/resource/*` 导入内部模块。
 
 ```ts
 import {
@@ -18,7 +18,7 @@ import {
   openMdv,
   parseMdv,
   verifyMdv,
-} from '@mdv/core'
+} from '@owariband/mdv'
 ```
 
 ## 打开与创建函数
@@ -527,7 +527,7 @@ try {
 
 ## Commit 与 Checkout
 
-M4 在同一个 `MdvDocument` facade 上提供以下 API，相关类型均从 `@mdv/core` package root 导出：
+M4 在同一个 `MdvDocument` facade 上提供以下 API，相关类型均从 `@owariband/mdv` package root 导出：
 
 ```ts
 interface CommitInput {

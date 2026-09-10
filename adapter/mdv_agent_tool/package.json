@@ -3,7 +3,7 @@
   "version": "0.1.0-preview.1",
   "description": "Read paired MDV reference/document content and save document drafts with conflict protection",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -31,7 +31,7 @@
     "package": "npm run build && npm pack --ignore-scripts --pack-destination dist"
   },
   "devDependencies": {
-    "@mdv/core": "file:vendor/mdv-core-0.0.0-development.tgz",
+    "@owariband/mdv": "file:vendor/owariband-mdv-0.0.0-development.tgz",
     "@types/node": "^22.0.0",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"

@@ -2,10 +2,10 @@
   "name": "mdv-vscode",
   "displayName": "MDV — Versioned Markdown",
   "description": "Edit Ref/Doc, reuse Markdown previews, and trace bound document versions.",
-  "version": "0.1.0-preview.6",
+  "version": "0.1.0-preview.7",
   "publisher": "mdv-local",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/owariband/mdv.git",
@@ -229,10 +229,10 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && node scripts/build.mjs",
     "test": "npm run build && node scripts/test-extension.mjs",
-    "package": "npm run build && vsce package --no-dependencies --skip-license --out dist/mdv-vscode-0.1.0-preview.6.vsix"
+    "package": "npm run build && vsce package --no-dependencies --out dist/mdv-vscode-0.1.0-preview.7.vsix"
   },
   "devDependencies": {
-    "@mdv/core": "file:vendor/mdv-core-0.0.0-development.tgz",
+    "@owariband/mdv": "file:vendor/owariband-mdv-0.0.0-development.tgz",
     "@types/markdown-it": "14.2.0",
     "@types/node": "^22.0.0",
     "@types/vscode": "1.100.0",

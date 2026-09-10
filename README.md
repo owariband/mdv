@@ -4,9 +4,9 @@
 
 # MDV
 
-MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@mdv/core` 是它的 TypeScript 参考实现。
+MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副本、显式版本和可追溯绑定关系的文档容器。`@owariband/mdv` 是它的 TypeScript 参考实现。
 
-> 当前状态：开发预览。M5.5 产品能力已完成，包含双树读写、显式版本/bind、trace、Diff/诊断与受管图片。M6 已补充安装验证、安全回归和性能基线，三系统 CI 的 10 组检查已通过；发布身份/License 与正式 npm 发布仍待收口。平台证据与限制见[兼容性文档](docs/compatibility.md)。
+> 当前状态：开发预览。M5.5 产品能力已完成，包含双树读写、显式版本/bind、trace、Diff/诊断与受管图片。M6 已补充安装验证、安全回归和性能基线，三系统 CI 的 10 组检查已通过；Core 发布身份已确定为 `@owariband/mdv`，项目采用 Apache-2.0，正式版本与 npm 发布仍待收口。平台证据与限制见[兼容性文档](docs/compatibility.md)。
 
 ## 为什么使用 MDV
 
@@ -20,7 +20,7 @@ MDV（Markdown Document with Versions）是一种为 Markdown 增加双工作副
 ## 当前可用能力
 
 ```ts
-import { createMdv, openMdv } from '@mdv/core'
+import { createMdv, openMdv } from '@owariband/mdv'
 
 let document = await createMdv('/documents/example.mdv')
 document = await document.saveDocument({
@@ -110,4 +110,4 @@ npm run bench -- --quick
 
 ## 发布与许可证状态
 
-仓库当前版本为 `0.0.0-development`，`package.json` 仍为 `UNLICENSED`。构建/发布检查生命周期已经建立；正式包名/scope、许可证与发布版本仍需 owner 决定。`npm run check:release -- --release` 在这些条件未满足时会失败，不会自动发布；在此之前不要把当前 API 当作 0.1 稳定承诺。
+Core 发布包名已确定为 `@owariband/mdv`，仓库及三个分发包采用 [Apache License 2.0](LICENSE)。当前版本仍为 `0.0.0-development`；构建/发布检查生命周期已经建立，首次发布前仍需确认 npm scope 发布权限并选择正式或预发布版本。`npm run check:release -- --release` 在版本未收口时会失败，不会自动发布；在此之前不要把当前 API 当作 0.1 稳定承诺。

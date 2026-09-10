@@ -1,4 +1,4 @@
-import { MdvError, openMdv, type VersionId } from '@mdv/core'
+import { MdvError, openMdv, type VersionId } from '@owariband/mdv'
 import { jsonOutput, MAX_OUTPUT_BYTES, ToolError, type ReadPair, type SaveDocumentRequest } from './protocol.js'
 
 export async function readPair(file: string, documentVersion?: VersionId): Promise<ReadPair> {

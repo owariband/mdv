@@ -1,4 +1,4 @@
-import { MdvError, type ContentSpec, type DocumentId, type VersionId } from '@mdv/core'
+import { MdvError, type ContentSpec, type DocumentId, type VersionId } from '@owariband/mdv'
 
 export const MAX_INPUT_BYTES = 16 * 1024 * 1024
 export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024

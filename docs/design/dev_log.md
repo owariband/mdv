@@ -3,6 +3,8 @@
 > 最后更新：2026-09-09
 >
 > 本页是 Git commit message 的详细版本，按最新提交在前排列。它补充已经推送但正文过于简略的历史提交，不改写 Git 历史。
+>
+> 2026-09-10 根 Core 的后续发布名已确定为 `@owariband/mdv` 并采用 Apache-2.0；下列旧提交中的 `@mdv/core`、`UNLICENSED` 和“License 待定”保留为当时事实，当前结论见 [D018](./decisions.md#d018发布包使用-owaribandmdv-与-apache-20)。
 
 ## 定位与维护方式
 
