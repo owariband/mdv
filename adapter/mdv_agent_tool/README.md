@@ -1,14 +1,24 @@
 # MDV Agent Tool
 
-独立于 `@owariband/mdv` 和 VS Code 插件的本地工具。一次调用完成一个动作并退出，不启动服务。
+独立于 VS Code 插件的一次性本地 CLI。`0.1.0-preview.2` 直接调用固定构建的 `@owariband/mdv` Core，提供成对读取、两棵版本树、Diff/Trace/诊断、Doc 完整生命周期、经用户显式批准的 Ref 写操作，以及受管图片；不启动服务，也不把 ZIP 当文本修改。
 
-当前 `0.1.0-preview.1` 只开放两项能力：**一起读取 Reference / Document，保存当前 Document 正文**。Reference 和不可变历史只读，保存不产生版本；没有提权开关、自动 commit 或冲突重试。
+## 能力与权限
+
+| 能力 | 命令 | 权限约束 |
+| --- | --- | --- |
+| 当前 Ref + Doc / 精确历史配对 | `read` | 只读 |
+| 状态、版本、Trace、Diff、完整性 | `status`、`versions`、`trace`、`diff`、`verify` | 只读 |
+| Doc 工作副本 | `save-document` | 必须携带 `read/status` 返回的 Doc baseline |
+| Doc 版本 | `commit-document` | 必须是用户明确要求的独立动作；显式 bind 或 `null` |
+| Doc 恢复 | `checkout-document` | 丢弃 dirty 工作副本时必须显式批准 |
+| Ref 工作副本与版本 | `save-reference`、`commit-reference`、`checkout-reference` | 每次执行前必须向用户展示操作并获得批准 |
+| 新建与受管图片 | `create`、`import-resource`、`resolve-resource`、`verify-resource` | 明确目标路径/输入文件；不覆盖已有包 |
+
+Agent commit 只允许 `actor.type: "agent"`，不能冒充 human。保存不自动 commit；Document commit 不自动选择最新 Ref。
 
 ## 安装与构建
 
-需要 Node.js 20+。本地安装包自带固定的 Core 构建，不要求用户安装未发布的 `@owariband/mdv`、VS Code 或本仓库源码。当前为 private、采用 [Apache-2.0](LICENSE) 的开发预览，未发布 npm。
-
-在本仓库构建：
+需要 Node.js 20+。本地安装包自带固定 Core，不要求消费方安装未发布的 `@owariband/mdv`、VS Code 或本仓库源码。当前 package 为 private、采用 [Apache-2.0](LICENSE) 的开发预览，尚未发布 npm。
 
 ```sh
 cd adapter/mdv_agent_tool
@@ -19,120 +29,234 @@ npm run test:package
 npm run package
 ```
 
-首次生成依赖锁时，使用 `npm install --ignore-scripts --registry=https://registry.npmjs.org`。如果重新打包的 Core tarball 完整性改变，在 `prepare:core` 后先显式重装本地包，再运行后续构建/测试：
+如果 `prepare:core` 生成了不同完整性的本地 Core tarball，需要显式重装后再构建：
 
 ```sh
 npm install --ignore-scripts --registry=https://registry.npmjs.org @owariband/mdv@file:vendor/owariband-mdv-0.0.0-development.tgz
 ```
 
-普通 `npm install` 可能沿用旧的本地包缓存。build 会拒绝记录与已安装 Core 不一致的情况；上述命令不修改全局 npm 配置。
-
-在 Agent 宿主的工具目录安装生成的 `mdv-agent-tool-0.1.0-preview.1.tgz`：
+安装生成的工具包：
 
 ```sh
-npm install /absolute/path/to/mdv-agent-tool-0.1.0-preview.1.tgz
+npm install /absolute/path/to/mdv-agent-tool-0.1.0-preview.2.tgz
 ```
 
-然后使用本地 `node_modules/.bin/mdv`（Windows 为 `mdv.cmd`），或由宿主将它加入工具进程的 PATH。下面的 `mdv` 均指这个已安装的入口；不要从公开 registry 猜测或下载同名工具。
+下文的 `mdv` 指安装目录中的 `node_modules/.bin/mdv`（Windows 为 `mdv.cmd`）。不要从公开 registry 猜测或下载同名包。
 
-## 成对读取
+## 命令概览
+
+```text
+mdv create --file <path.mdv> [--markdown-profile gfm]
+mdv read --file <path.mdv> [--json] [--document-version <version-id>]
+mdv status --file <path.mdv>
+mdv versions --file <path.mdv> [--tree reference|document]
+mdv trace --file <path.mdv> --tree <reference|document> --version-id <id>
+mdv diff --file <path.mdv> --input <request.json|->
+mdv verify --file <path.mdv> [--mode metadata|full]
+
+mdv save-document --file <path.mdv> --input <request.json|->
+mdv commit-document --file <path.mdv> --input <request.json|->
+mdv checkout-document --file <path.mdv> --input <request.json|-> [--user-approved-discard]
+
+mdv save-reference --file <path.mdv> --input <request.json|-> --user-approved-reference-write
+mdv commit-reference --file <path.mdv> --input <request.json|-> --user-approved-reference-write
+mdv checkout-reference --file <path.mdv> --input <request.json|-> --user-approved-reference-write [--user-approved-discard]
+
+mdv import-resource|resolve-resource|verify-resource --file <path.mdv> --input <request.json|->
+```
+
+除 `read` 的默认人类展示和 `--help/--version` 外，成功与失败都是单个 JSON envelope。
+
+## 读取与按树 baseline
 
 ```sh
-mdv read --file example.mdv
 mdv read --file example.mdv --json
 ```
 
-默认文本有文档身份、generation、来源/权限说明，然后是固定两段：
+`data.reference.text` 与 `data.document.text` 是同一次已保存快照中的精确 Markdown。VS Code 尚未保存的 buffer 不可见。当前读取还为两侧分别返回可复制的 baseline：
 
-```text
-reference document:
-这里是 Reference Markdown
-
-actual document:
-这里是 Document Markdown
+```json
+{
+  "documentId": "d_0123456789abcdef0123456789abcdef",
+  "generation": 28,
+  "tree": "document",
+  "head": "v_0123456789abcdef0123456789abcdef",
+  "contentBytes": 1234,
+  "contentSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
 ```
 
-两份内容来自同一次 `openMdv` 的已保存快照，默认读取当前工作副本，不要求 commit；VS Code 的未保存 buffer 不可见。当前 Ref 工作副本不是历史 Doc 自动绑定的 Ref，普通成对读取也不创建 bind。普通新建的 0 字节 `.mdv` 读作两份空正文，不写磁盘；首次保存才形成 ZIP。
+真实调用必须复制工具返回的整个 baseline，不能自行构造、只更新 generation 或把 Ref baseline 用于 Doc。`status` 在 `data.baselines.reference/document` 返回相同结构，不返回正文。
 
-`--json` 适合 Agent 结构化调用：JSON 中的 `data.reference.text`、`data.document.text` 保留精确换行、空白和末尾状态；`documentId`、`generation` 是下次保存必须使用的基线。其他字段为 `baseDirectory`、两段各自的 Core `ContentSpec` 来源和 `permissions`。外部图片的相对基准是 `.mdv` 所在目录，读取正文不自动打开图片或执行链接。
-
-文本展示会增加区段之间及输出末尾的换行，不可通过分隔标题重新解析完整正文；正文自身可能含同样的标题。精确处理和回写请使用 JSON 字段，不把展示包装一起写入 Doc。
-
-历史读取：
+历史配对读取：
 
 ```sh
 mdv read --file example.mdv --document-version v_0123456789abcdef0123456789abcdef --json
 ```
 
-示例 ID 是占位符，需使用真实 Doc Version ID。结果是该历史 Doc 和其精确绑定的历史 Ref，而不是最新 Ref；未绑定时 `reference.source` 为 `null`，`reference.text` 为空字符串，文本标注 `unbound`。历史两侧均只读，返回的 generation 是当前包快照的 generation，不是版本序号。
+结果是该 Document Version 和它精确绑定的历史 Ref；unbound 时 `reference.source` 为 `null`、正文为空。历史两侧只读，因此不返回可写 baseline。相对图片/链接以 `baseDirectory`（`.mdv` 所在目录）为基准。
 
-## 默认只保存正文
+默认文本仍使用固定的 `reference document:` / `actual document:` 标题，但正文自身也可能包含这些字符串。精确处理必须使用 JSON 字段，不能从展示文本切割后回写。
 
-先读取，然后把返回的真实身份和 generation 放入请求：
+## Doc 保存、提交与恢复
+
+保存当前 Doc 工作副本：
 
 ```json
 {
-  "expectedDocumentId": "d_0123456789abcdef0123456789abcdef",
-  "expectedGeneration": 7,
-  "markdown": "# Agent 修改后的正文\n"
+  "baseline": { "这里复制": "data.document.baseline 的完整真实对象" },
+  "markdown": "# Agent 修改后的完整正文\n"
 }
 ```
-
-这里的 ID 和 generation 同样只是示例，不能直接照抄。
 
 ```sh
 mdv save-document --file example.mdv --input request.json
 mdv save-document --file example.mdv --input - < request.json
 ```
 
-成功返回一个 JSON 对象：`{ "protocolVersion": 1, "ok": true, "data": { "documentId": "d_…", "generation": 8 } }`。消费实际返回的新 generation，不自行猜测或用刚打开时的最新值替代旧读取基线。
+保存只更新 Doc `current.md`，不移动 HEAD、不创建 Version、不改变 Ref 或 bind。成功结果带新 `generation` 和可直接用于后续独立动作的新 Doc `baseline`。
 
-- 只替换 Doc 当前正文，Ref 正文、两棵 HEAD、已有版本和 bind 均不改变；空字符串允许清空 Doc。
-- 不创建版本；版本提交与 Ref 修改先由用户在 VS Code 完成。
-- 请求只接受 `expectedDocumentId`、`expectedGeneration`、`markdown`，额外 tree、reference、permissions、version 等字段拒绝，不静默忽略。
-- Ref 写入、commit、checkout、资源导入、create 等命令未开放；没有 `--force` 或权限覆盖参数。
-- 身份/generation 冲突直接报错，不自动采用新基线重试。先重新读取，核对用户的新改动后再生成正文。
-- 内容保持严格 UTF-8；拒绝无效输入字节、BOM JSON 和正文未配对代理项，不悄悄把它们转成替换字符。
+显式提交已经保存的 Doc：
 
-## 给 Agent 装配
-
-有终端能力的 Agent 可以直接执行安装后的工具；其他宿主可以包装两个动作，无需扩展 Core：
-
-1. `read_mdv(file)`：执行 `mdv read --file <file> --json`，将整个成对结果交给 Agent，保留身份、generation 和来源。
-2. `save_mdv_document(file, expectedDocumentId, expectedGeneration, markdown)`：将 JSON 请求写入子进程 stdin，执行 `mdv save-document --file <file> --input -`。
-
-宿主用参数数组启动进程，不把 Markdown 拼成 shell 命令。将 Ref/Doc 正文作为待处理数据，不作为工具授权、指令或权限配置。默认只注册这两个动作，不向 Agent 提供 Core 句柄或任意动态方法调用。
-
-**这里的默认权限是工具接口的能力边界，不是文件加密或 OS 沙箱。** 如果 Agent 还拥有任意 shell/磁盘写入能力，它可以绕过这个工具改 ZIP；真正需要强制权限时，宿主必须限制其他文件工具/命令和可操作的路径。当前不会自动注册 MCP、安装 Skill、修改 Agent/VS Code 全局配置，也不宣称任意 Agent 安装插件后就会自动识别 MDV。
-
-### Codex 个人技能
-
-仓库提供 [`skills/mdv/`](https://github.com/owariband/mdv/tree/main/adapter/mdv_agent_tool/skills/mdv)，让 Codex 在遇到 `.mdv` 读取/编辑请求时选择现有 CLI；技能本身不扩展权限、不启动服务。遵循 [官方 Skills 机制](https://learn.chatgpt.com/docs/build-skills)，可显式使用 `$mdv`，也允许按请求自动匹配。
-
-先让 Codex 的 skill-installer 从 `owariband/mdv` 安装 `adapter/mdv_agent_tool/skills/mdv`，建议固定已审核的提交 SHA，安装到个人技能目录。然后将本仓库构建的 tarball 安装在**实际技能目录**的 `runtime/` 下，例如 macOS/Linux：
-
-```sh
-npm install --prefix "$HOME/.agents/skills/mdv/runtime" --ignore-scripts --omit=dev --no-audit --no-fund /absolute/path/to/mdv-agent-tool-0.1.0-preview.1.tgz
-node "$HOME/.agents/skills/mdv/runtime/node_modules/@mdv/agent-tool/dist/cli.cjs" --version
+```json
+{
+  "baseline": { "这里复制": "最新 Doc baseline" },
+  "summary": "Add VideoRAG modernization boundary",
+  "actor": { "type": "agent", "name": "Codex" },
+  "referenceVersion": "v_0123456789abcdef0123456789abcdef"
+}
 ```
 
-技能指令以自身位置定位 CLI，不依赖 MDV 仓库位置或当前工作目录。如果安装器选择了其他技能目录，替换上面的路径。这里不是 `npm install -g`，不改 shell PATH、Git 身份或 Codex 的全局配置文件。源码/构建步骤仍见本文开头，不从 registry 下载同名占位包。
+`referenceVersion` 必须是实际使用的精确 Ref Version，也可以显式为 `null`；字段不能省略。成功结果明确返回 `created`，创建时返回真正的 MDV `v_…`，不能把 Git SHA 称为 MDV commit。
 
-安装后下一轮对话可使用该技能；若宿主未刷新列表，重启 Codex。个人技能提供跨项目的发现与调用说明，不代表本轮对话新增了一个 MCP 函数，也不绕过工作区文件访问限制。
+恢复历史 Doc：
 
-## 输出、错误和边界
+```json
+{
+  "baseline": { "这里复制": "最新 Doc baseline" },
+  "version": "v_0123456789abcdef0123456789abcdef",
+  "discardChanges": false
+}
+```
 
-- `read` 默认文本，可选 JSON；save 和所有正常错误均为单个 JSON envelope。help/version 是独立文本入口，stderr 不打印正文或堆栈。
-- 失败为 `{ protocolVersion: 1, ok: false, error: { origin, code, message, details? } }`；Core code/details 原样保留，输入/权限失败标记 adapter。
-- 退出码：0 成功；2 参数、编码或传输预算；3 Core / 输入 I/O；4 默认权限拒绝；1 未知内部或输出失败。
-- 请求 UTF-8 字节上限 16 MiB（stdin 和文件相同），成功 JSON 响应上限 32 MiB（计入转义和包装）。文本 read 也先检查其结构化成对结果预算，超限整体失败，不把截断内容当成功读出的完整文档。
-- stdout 管道中断可能发生在成功写盘之后。工具尽力以 stderr 报 `OUTPUT_ERROR` 并 exit 1；Core `details.committed: true` 同样代表应先观察磁盘。没有收到成功响应不等于写入已回滚，不能盲目重试。
-- 只操作明确路径，不自动扫描工作区、读图片、删除锁或修复坏包。文件访问、路径权限和进程执行权限仍由宿主/OS 负责。
+默认拒绝覆盖 dirty 工作副本。只有用户看见并批准丢弃内容后，才将 `discardChanges` 设为 `true`，同时追加 `--user-approved-discard`；只加参数或只改 JSON 都不够。
 
-## 验证与后续
+## Ref 的可见用户批准
 
-`npm test` 运行真实子进程检查：成对读取/精确历史、仅正文写入、空文件、Ref/HEAD/版本/bind 保持、两进程竞争、同路径换身份、非法/超限输入输出、默认权限拒绝和 stdout 失败后的真实落盘状态。
+执行任何 Ref 写操作前，Agent 必须在对话中说明准确文件、动作和影响并等待用户肯定答复。例如：
 
-`npm run test:package` 在仓库外的干净工具目录安装 tarball，再让相同测试调用安装后的 CLI，不通过根源码或未发布 Core 包执行生产代码。测试输出记录实际平台；本机结果不代表 Windows/Linux 已验证。
+> 是否允许我保存 `/path/example.mdv` 的 Reference 工作副本？这会修改 Ref，但不会自动创建版本。
 
-当前不包含任意 sources 读取、versions/trace 独立命令、patch、commit/checkout、Ref 提权、图片操作、MCP 或自动装配。这些能力按后续明确需求扩展；不将旧设计草案里的命令当成已经可用。
+获得本次操作的批准后，才允许在对应命令上添加：
+
+```text
+--user-approved-reference-write
+```
+
+缺少该参数时，CLI 在进入 Core 写事务前以 exit 4 失败：
+
+```json
+{
+  "protocolVersion": 2,
+  "ok": false,
+  "error": {
+    "origin": "adapter",
+    "code": "USER_APPROVAL_REQUIRED",
+    "message": "...",
+    "requiredApproval": {
+      "scope": "reference-write",
+      "action": "save-reference",
+      "file": "/absolute/path/example.mdv"
+    }
+  }
+}
+```
+
+此参数是 fail-closed 的误操作防线和明确审计语义，不是密码学用户证明。CLI 无法证明通用 Agent 是否真的展示过问题；需要硬隔离时，宿主还必须限制任意 shell/文件写权限并签发自己的授权能力。批准一次只对应用户刚确认的准确动作，不得推广成后续 Ref 写入的永久许可。
+
+Ref save/commit/checkout 的请求分别与 Doc 同形，只把 baseline 换成 `reference`；Reference commit 不接受 `referenceVersion`。Ref checkout 同样默认保护 dirty 内容；需要丢弃时必须同时具备两个批准参数。
+
+## 查询、Diff 与诊断
+
+```sh
+mdv status --file example.mdv
+mdv versions --file example.mdv --tree document
+mdv trace --file example.mdv --tree document --version-id v_0123456789abcdef0123456789abcdef
+mdv verify --file example.mdv --mode full
+```
+
+`verify` 即使发现损坏也会以 `ok: true` 返回诊断报告；调用方必须检查 `data.report.valid` 与 `complete`。
+
+任意两个 Core `ContentSpec` 的 Diff：
+
+```json
+{
+  "from": { "tree": "document", "kind": "version", "version": "v_0123456789abcdef0123456789abcdef" },
+  "to": { "tree": "document", "kind": "working-copy" },
+  "contextLines": 3
+}
+```
+
+`trace document` 返回该 Doc 的 ancestry 与精确 Ref；`trace reference` 返回 Ref ancestry 和直接使用它的全部 Doc Versions。
+
+## 受管图片
+
+导入只读取明确指定的本地图片文件，支持 Core 的 PNG/JPEG/GIF/WebP 检查：
+
+```json
+{
+  "expectedDocumentId": "d_0123456789abcdef0123456789abcdef",
+  "sourceFile": "/absolute/path/cat.png",
+  "mediaType": "image/png",
+  "maxBytes": 33554432
+}
+```
+
+成功返回可插入 Markdown 的 `relativePath`。导入 sidecar 不改变 `.mdv` generation。`resolve-resource` / `verify-resource` 请求为：
+
+```json
+{
+  "expectedDocumentId": "d_0123456789abcdef0123456789abcdef",
+  "relativePath": "./.mdv-assets/d_.../<sha256>.png"
+}
+```
+
+## 并发与冲突隔离
+
+`.mdv` 是一个通过原子替换发布的 ZIP，所以物理事务锁始终覆盖整个容器。Ref/Doc 的逻辑 baseline 独立：
+
+```text
+物理写盘：整个 .mdv 串行
+冲突判断：只检查本次操作依赖的树
+```
+
+- generation 未变化时正常进入 Core CAS；
+- generation 已前进、但目标树内容未变时，save 可以安全采用当前 generation；
+- commit/checkout 还要求目标树 HEAD 未变；
+- 另一棵树的保存/提交不制造假冲突；
+- 目标树内容或依赖的 HEAD 变化时返回 `CONFLICT`，不覆盖赢家；
+- 短暂整包锁竞争和 generation CAS 竞争会在每次重新核对目标树后有限重试，不重放旧正文；
+- documentId 改变、generation 倒退或 `details.committed: true` 永不自动重试。
+
+这与 VS Code 插件的按工作副本 content identity 保护一致，不把物理 ZIP 锁错误拆成两把可并发覆盖的文件锁。
+
+## Codex Skill 装配
+
+仓库提供 [`skills/mdv/`](https://github.com/owariband/mdv/tree/main/adapter/mdv_agent_tool/skills/mdv)。先通过 skill-installer 固定审核过的提交安装技能，再把本地 tarball 安装到该技能自己的 `runtime/`：
+
+```sh
+npm install --prefix /absolute/path/to/skills/mdv/runtime --ignore-scripts --omit=dev --no-audit --no-fund /absolute/path/to/mdv-agent-tool-0.1.0-preview.2.tgz
+node /absolute/path/to/skills/mdv/runtime/node_modules/@mdv/agent-tool/dist/cli.cjs --version
+```
+
+Skill 负责选择命令、保持 baseline、在 Ref/丢弃操作前向用户提问，并如实区分 save、MDV commit 与 Git commit。它不扩大 OS 权限、不自动安装 MCP，也不允许通过 Core/unzip/普通文本写入绕过 CLI 授权。
+
+## 输出、错误与验证
+
+- 协议版本为 `2`；失败 envelope 保留 Core code/details，adapter 输入、批准和 baseline 错误有明确来源。
+- 退出码：0 成功；2 参数、编码或预算；3 Core、I/O 或冲突；4 权限/用户批准缺失；1 未知内部或输出失败。
+- JSON 请求上限 16 MiB，成功输出上限 32 MiB，图片上限 32 MiB；超限整体失败，不返回可误用的截断正文。
+- stdout 中断或 Core `details.committed: true` 表示写入结果可能已经发布。先重新 `read/status`，不能盲目重放。
+- CLI 不删除锁、不强修坏包、不执行 Markdown 内容、不扫描工作区，也不提供 merge、patch、资源 GC、MCP 或常驻服务。
+
+`npm test` 使用真实子进程覆盖完整命令面、Ref/丢弃批准、精确 bind、按树冲突隔离、同树单赢家、跨树并发、身份替换、预算与输出不确定性。`npm run test:package` 会在仓库外安装 tarball 后重复同一套测试，不通过根源码执行生产 CLI。

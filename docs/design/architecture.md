@@ -885,7 +885,7 @@ Reader 将 `.mdv` 当作不可信归档处理：
 
 ## 12. 包与模块边界
 
-具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。Core 仍是根目录单个 `@owariband/mdv` 包，不把内部职责拆成多个 npm package。同仓 `adapter/mdv_vscode/` 已交付本地预览版，Agent tool 仍在规划；不迁移 Core，也不引入 workspace：
+具体模块职责和模型映射见 [`mechanisms.md`](./mechanisms.md)。Core 仍是根目录单个 `@owariband/mdv` 包，不把内部职责拆成多个 npm package。同仓 `adapter/mdv_vscode/` 与 `adapter/mdv_agent_tool/` 均已交付本地预览版；不迁移 Core，也不引入 workspace：
 
 ```text
 mdv/
@@ -893,7 +893,7 @@ mdv/
 ├── tsconfig.json
 ├── adapter/                    # 不属于 Core 的源码或发布产物
 │   ├── mdv_vscode/             # 已实现，本地 VSIX 预览版
-│   └── mdv_agent_tool/         # 仅计划，尚未创建
+│   └── mdv_agent_tool/         # 已实现，本地 Agent CLI 预览版
 ├── docs/
 │   ├── README.md
 │   ├── getting-started.md
@@ -973,7 +973,7 @@ Agent model
 
 普通 `.md` 是单个 UTF-8 文本文件，Agent Runtime 可以直接调用文件系统 read/write/patch。`.mdv` 是带不变量的 ZIP 文档包，修改时应由工具调用 Core，不能把内部 entry 当作普通路径直接覆盖。
 
-Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚本或 MCP tool；这些包装均不属于 MDV 格式或 Core 的内部层次，也不要求常驻服务。当前 Core 不包含 CLI；2026-09-08 已按实际终端使用需求维护独立 `adapter/mdv_agent_tool/` 的[一次性 CLI 方案](./agent_tool.md)，尚未实现。命令协议和权限装配由该上游项目负责。
+Agent tool 可以是宿主内注册的 TypeScript 函数、一次性 Node.js 脚本或 MCP tool；这些包装均不属于 MDV 格式或 Core 的内部层次，也不要求常驻服务。当前 Core 不包含 CLI；独立 `adapter/mdv_agent_tool/` 已按[一次性 CLI 方案](./agent_tool.md)实现协议 v2 完整命令面、按树 baseline 和批准闸门。命令协议、权限装配和有限竞争重试属于该上游，整包锁、generation CAS 与原子替换仍只由 Core 保证。
 
 面向人的 Reference/Document 左右对照由宿主组合现有 bind/trace 与读取接口：Core 保证某个 Document Version 精确对应其绑定的 Reference Version（或明确未绑定），宿主再决定双栏布局、Markdown 渲染、同步滚动以及是否调用编辑器原生 Diff。M5 的结构化 Diff 更偏向 Agent/自动化消费，不要求图形客户端用它替代自身的显示能力。
 

@@ -1,6 +1,6 @@
 # MDV 开发提交日志
 
-> 最后更新：2026-09-09
+> 最后更新：2026-09-10
 >
 > 本页是 Git commit message 的详细版本，按最新提交在前排列。它补充已经推送但正文过于简略的历史提交，不改写 Git 历史。
 >
@@ -12,6 +12,17 @@
 - Git 中继续使用 Conventional Commit 风格的简短标题；标题后保留一个空行，再用逐项 bullet 写正文，并把同样的信息同步到本页。
 - 本页不是格式或 API 的规范来源。容器格式以 [`spec/format-0.1.md`](../../spec/format-0.1.md) 为准，公开接口以 [`src/index.ts`](../../src/index.ts) 和测试为准，当前进度以 [`roadmap.md`](./roadmap.md) 为准。
 - 未来提交在本页顶部追加；已经发布的历史记录只补充事实，不为了美化叙述而改写代码边界或验收结果。
+
+## 2026-09-10 — `@mdv/agent-tool 0.1.0-preview.2` 完整能力与本地交付
+
+- 将 A0/A1 的 `read` + `save-document` 收窄接口升级为协议 v2 完整命令面：查询覆盖 status/versions/trace/diff/verify，写入覆盖两棵树的 save/commit/checkout、create 与受管资源 import/resolve/verify；没有把 VS Code 标签、布局或预览 UI 搬进 CLI。
+- 当前写请求复制目标树完整 baseline：documentId、generation、tree、HEAD、正文 bytes 与 SHA-256。物理写盘仍只使用 Core 整包锁、generation CAS 与原子替换；generation 变化后 adapter 仅在目标树依赖未变时重新进入 Core，同树变化、HEAD 变化或路径换 documentId 均冲突。
+- 所有 Reference 写命令缺少 `--user-approved-reference-write` 时在 Core 前以 exit 4 拒绝；dirty checkout 丢弃另需 `--user-approved-discard`。Skill 要求先向用户展示文件和准确动作再传 flag，并明确 CLI flag 不是密码学证明。
+- Agent commit 只接受 `actor.type: agent`；Document bind 必须显式选择精确 Reference Version 或 `null`，不会偷偷追随最新 Ref，也不会自动 commit。
+- 真实子进程回归由 19 项扩展到 22 项并已通过，包含 Ref→Doc/Doc→Ref 跨树重基、跨进程不同树双成功、同树两侧各自单赢家、Ref 批准、丢弃批准、身份替换、资源和协议预算；仓库外安装生成 tarball 后同一套 22 项再次通过。
+- 使用最终本地 tarball 将已有个人 `~/.agents/skills/mdv/runtime/` 从 preview.1 升级到 preview.2，并同步仓库 Skill/agent metadata；安装前完整备份到 `/private/tmp/mdv-skill-preview1-backup-20260910-1817`。安装后 CLI 版本、两份 Skill 文件 byte-for-byte 一致，以及对 AnimeVAG 实际文档的只读 `status` 均通过；当前会话的发现缓存不视为已刷新。
+- VS Code 可选真实 CLI 用例已改用 v2 baseline，并以隔离安装版 VSIX + 上述个人 runtime 实跑：macOS arm64 / VS Code 1.136.1 / Extension Host Node 24.18.1 完整 22/22，Agent 子进程明确通过，renderer 日志无销毁错误。O006 本次未复现但不据一次成功关闭。
+- 本批仅修改 Agent adapter、配套 Skill/文档和 VS Code 联调测试，不修改 Core 或插件生产代码。
 
 ## `07ab810` — `feat: add a discoverable Codex skill for the MDV CLI`
 

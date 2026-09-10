@@ -2,6 +2,10 @@
 
 本文件只追加简短索引；具体结论写入对应设计页面。
 
+## 2026-09-10
+
+- 按用户确认将 Agent Tool 升级为 `0.1.0-preview.2` / 协议 v2：开放除 VS Code 专属 UI 外的完整 Core 命令面，以每棵树正文身份和 HEAD 隔离逻辑冲突，保留整包锁/CAS/原子替换。Reference 写入与 dirty checkout 丢弃均在 CLI 入口 fail closed；commit 只接受 agent actor，Document 必须显式精确 bind 或 unbound。源码构建与仓库外 tarball 安装均重复 22 项真实子进程回归并通过；个人 Skill/runtime 已升级并以真实文档只读核对，安装版 VSIX + v2 CLI 完整联调 22/22。本批纳入当日整体 Agent Tool 交付，npm/Marketplace 仍未发布。
+
 ## 2026-09-09
 
 - 已将 U1 成果 `2d68ef6` 和详细日志 `416c666` 推送至 `origin/main`；后者对应 [CI](https://github.com/owariband/mdv/actions/runs/34306309915) 10/10 成功。未改写历史，个人测试文档、telemetry ignore 和全局 Git 配置未动。

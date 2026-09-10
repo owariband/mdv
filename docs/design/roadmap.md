@@ -47,7 +47,7 @@
 | M6 稳定发布 | 进行中 | 可重复 fixtures、有界 fuzz、复杂 Markdown 回归、干净源码 tarball/TS consumer、基准、10 组 CI 通过与 release gate；包名确定为 `@owariband/mdv`，采用 Apache-2.0 | npm scope 发布权限、版本选择和实际发布待完成 |
 | U1 VS Code extension | 本地预览版 | `adapter/mdv_vscode/` 已实现；原生 Markdown 编辑/预览、版本/bind、图片与冲突保护；本机安装回归通过 | 最低版本、Windows/Linux GUI、剪贴板矩阵、其他 renderer 与正式分发待验收 |
 | U2 MarkText adapter | 上游等待 | MarkText/Muya 可以消费 Markdown string | 排在 VS Code 首个客户端之后 |
-| U3 独立 CLI / Agent tool | 下一步，与 U1 联调 | 开发方案已记录，规划于 `adapter/mdv_agent_tool/`；一次性 CLI | 尚无命令实现；需协议、身份/generation 保护、安装与真实 Agent 验收 |
+| U3 独立 CLI / Agent tool | 本地 preview.2 | 完整 Core 命令面、协议 v2 双 baseline、Ref/丢弃批准、跨树冲突隔离、Codex Skill | 仓库外安装与个人 runtime 更新、Windows/Linux、真实 Agent + VS Code 完整流程待最终验收 |
 
 核心开发依赖顺序为：
 
@@ -578,18 +578,20 @@ MarkText adapter 位于 `../markText`，不进入 `@owariband/mdv`。Muya State 
 
 ### U3：独立 CLI / Agent tool
 
-状态：**A0/A1 已通过 `6e41aaa` 推送；个人 Skill `07ab810` 已安装，本机跨项目发现与实际 CLI 验证通过**
+状态：**A0/A1 已推送；A2/A3 已在 `0.1.0-preview.2` 完成实现、tarball、个人 runtime 与安装版 VS Code v2 联调**
 
 CLI 已放在 `adapter/mdv_agent_tool/`，仍是完全独立于 Core 的上游 package：
 
 - 只依赖 `@owariband/mdv` package root；
 - 将 argv、stdin、stdout、JSON envelope 和退出码映射到 Core public API；
-- 当前只提供成对 `read` 和 `save-document`，另可按历史 Doc 的精确 bind 成对读取；默认禁止 Ref/历史写入，不自动 commit；
-- 遵守 `expectedGeneration` 和稳定错误码；
+- 提供成对/历史精确 `read`、status/versions/trace/diff/verify、Doc save/commit/checkout、create 与受管图片；
+- Ref save/commit/checkout 必须先获得当次用户可见批准并携带 CLI 授权参数，dirty checkout 需要独立丢弃批准；
+- 协议 v2 的 Ref/Doc baseline 包含 documentId/generation/HEAD/content identity；整包锁不拆，目标树未变时安全重基另一树引起的 generation 前进；
+- Agent commit 强制 `actor.type=agent`，Document bind 必须显式 Version ID 或 `null`，不自动 commit 或绑定最新 Ref；
 - 不直接解包修改 entry，也不复制 Core 的版本规则；
 - 不要求 Core 启动服务或常驻进程。
 
-命令、文本/JSON 输出、跨调用 documentId/generation 和 A0–A3 验收在 [Agent Tool 方案](./agent_tool.md)中单独维护。A0/A1 的 19 项真实子进程检查已在 Node 20/26 通过，仓库外 tarball 安装后同样通过。create/status/versions/trace/diff/verify 等独立命令和有权限的 Ref/版本/图片修改仍是后续设计，不因 Core 已有方法而默认开放；不进入 Core public model，也不要求插件通过 CLI 执行自己的保存。
+命令、协议、按树冲突和批准语义在 [Agent Tool 方案](./agent_tool.md)中单独维护。preview.2 的 22 项真实子进程检查覆盖完整命令面、跨树双成功/同树单赢家、身份替换、Ref/丢弃 fail closed、精确 bind、资源与预算；仓库外安装生成的 tarball 后已重复同一套 22 项并通过。能力仍不进入 Core public model，也不要求插件通过 CLI 完成自己的保存。
 
 ## 6. 下一批开发任务
 
@@ -597,7 +599,7 @@ M6 的工程交付与跨平台 CI 验收已完成；首次 Windows 失败已修�
 
 1. U1 已交付：独立 Core tarball consumer、原生虚拟 Markdown 编辑/预览、手动与自动保存、图片 provider、commit/checkout、精确 bind、外部变化保护和本机 VSIX 安装/恢复验证；Core 生产代码与保存策略未改。
 2. 下一轮 U1 试用验收覆盖真实剪贴板/拖入、用户选定的其他 Markdown renderer、最低 VS Code 与 Windows/Linux GUI；已有 macOS 实测不外推为全平台承诺。
-3. 2026-09-09 已按用户“读取两段、默认只改正文”要求完成并推送 Agent A0/A1；真实安装后 CLI → 插件 clean 刷新/dirty 保护用例已通过。按后续要求提供 Codex 个人 Skill，复用原 CLI，不新增服务或默认权限。用户当前准备迁移工作重心，A2/A3 和插件验收作为后续按需任务，不主动展开。扩展完整 UI 回归暴露的既有撤销问题仍列入 O006，不把 20/21 说成全套通过。
+3. 2026-09-10 已按用户新授权实现 Agent A2/A3：补齐 VS Code 之外有 CLI 意义的 Core 操作；Ref 写入和 dirty checkout 显示批准，协议按树识别真正冲突。仓库外 tarball 已通过 22 项，个人 Skill/runtime 已升级并核对 preview.2；安装版 VSIX 的真实 Agent v2 子场景与完整套件为 22/22。既有 O006 本次未复现但保留开放；本批进入 Git 交付，仍未发布 npm 或 Marketplace。
 4. 在真实宿主中测保存频率与历史规模；已有本机基线不等于验证了 10,000 Version / 512 MiB 上限或断电持久性。
 5. 正式公开分发前由 owner 确认 `@owariband` npm scope 发布权限和版本策略；包名已确定为 `@owariband/mdv`，License 已确定为 Apache-2.0。运行严格 release gate、最终产物与目标提交 CI，记录真实版本后再将 M6 标为正式发布完成。MarkText 排在首个客户端验证之后。
 

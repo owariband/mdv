@@ -21,7 +21,7 @@
 ## 独立上游工具
 
 - [VS Code 插件](../adapter/mdv_vscode/README.md)：原生 Markdown 编辑与预览、双列版本图和精确 bind；本地 VSIX。
-- [Agent Tool](../adapter/mdv_agent_tool/README.md)：一次读取 Ref/Doc，默认只保存正文；本地 CLI 安装包，不启动服务，不自动 commit。
+- [Agent Tool](../adapter/mdv_agent_tool/README.md)：成对读取、版本/Trace/Diff/诊断、Doc 完整生命周期和经用户批准的 Ref 操作；本地 CLI 安装包，不启动服务、不自动 commit。
 
 它们分别安装，不是 Core 的内部层，也不会由安装 Core 自动给 Agent 装配。具体默认权限和平台证据见各自说明。
 

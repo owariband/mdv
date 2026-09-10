@@ -2,7 +2,7 @@
 
 > 设计知识根：`docs/design/`
 >
-> 最后更新：2026-09-09
+> 最后更新：2026-09-10
 
 这里记录产品语义、实现机制、阶段计划和设计决策，面向 Core 维护者。调用方应优先阅读 [`docs/`](../README.md) 中的官方使用文档；本目录可能描述尚未实现的目标 API。
 
@@ -14,7 +14,7 @@ M4 没有增加另一套 Draft 模型：编辑器内存 buffer 归宿主，Core 
 
 M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务。人类侧 Reference/Document 左右对照的核心仍是 bind + 精确读取，具体 mode 和渲染属于上游插件。M5.5 已补齐可选图片 hash sidecar：普通路径仍由宿主自由管理，受管图片由 Core 导入并返回相对路径，resolve 返回真实本地绝对路径。M6 本地与远端检查通过不等于已经发布；Core 包名已确定为 `@owariband/mdv`，仓库采用 Apache-2.0，剩余 scope 发布权限、版本与发布验收完成后才达到 0.1 稳定发布口径。
 
-2026-09-08 按用户要求进入 U1：[`adapter/mdv_vscode/`](../../adapter/mdv_vscode/README.md) 已实现并产出本地预览 VSIX，复用原生 Markdown 编辑/渲染和兼容扩展，提供 Ref/Doc、图片、显式版本与精确 bind 对照。本机安装版 Extension Host 验证通过，Windows/Linux、最低版本和任意第三方 renderer 仍待验证；详细证据见[插件方案 §8](./vscode_plugin.md#8-开发阶段与验收)。`adapter/mdv_agent_tool/` 仍仅有设计，尚未实现。Core 仍在根 package，adapter 只消费 package root；见 [D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 与 [D014](./decisions.md#d014vs-code-复用原生-markdown-编辑与渲染)。
+2026-09-08 按用户要求进入 U1：[`adapter/mdv_vscode/`](../../adapter/mdv_vscode/README.md) 已实现并产出本地预览 VSIX，复用原生 Markdown 编辑/渲染和兼容扩展，提供 Ref/Doc、图片、显式版本与精确 bind 对照。本机安装版 Extension Host 验证通过，Windows/Linux、最低版本和任意第三方 renderer 仍待验证；详细证据见[插件方案 §8](./vscode_plugin.md#8-开发阶段与验收)。Core 仍在根 package，两个 adapter 只消费 package root；见 [D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 与 [D014](./decisions.md#d014vs-code-复用原生-markdown-编辑与渲染)。
 
 最新入口修正：[D015](./decisions.md#d015普通空文件是正常的新建入口) 明确普通新建空 `.mdv` 必须能直接编辑。`openMdv` 打开空文件不写磁盘，首次保存才建立 ZIP；VS Code `preview.2` 自动进入 Doc 编辑区。非空坏包、历史和冲突保护仍保持严格；这不是要求用户手动初始化文件。
 
@@ -22,9 +22,9 @@ M5 主要由 Agent/自动化需求驱动，没有修改 Format 0.1 或写事务�
 
 2026-09-09 本地交付更新至 `preview.6`：侧栏适配可用宽高，打开文档不抢占用户的侧栏选择；包入口在 Webview 加载确认后才切换到原生 Doc，修复重复打开的销毁竞态；活动栏复用项目猫头 SVG。最新安装版基础回归 20 项通过，此前含 Markdown All in One 的 21 项及两种 reload/Restricted Mode 验证单独保留；详见[插件方案 §8.3](./vscode_plugin.md#83-preview4preview6-交付2026-09-09)。
 
-2026-09-09 U3 A0/A1 已实现：[`adapter/mdv_agent_tool/`](../../adapter/mdv_agent_tool/README.md) 提供成对读取（默认文本/可选 JSON）、历史 Doc 精确 bind 读取和仅正文保存。默认不开放 Ref/历史修改，写入必须携带旧文档身份/generation；ZIP 与 Core public API 不变。19 项 Node 20/26 子进程回归及独立安装包验证通过，CLI 不自动给宿主注册工具；此前“仅有设计”的记录被此状态更新取代。
+2026-09-10 U3 更新至 `0.1.0-preview.2`：[`adapter/mdv_agent_tool/`](../../adapter/mdv_agent_tool/README.md) 已覆盖成对读取、status/versions/trace/diff/verify、Doc save/commit/checkout、经用户可见批准的 Ref save/commit/checkout，以及 create/受管图片。协议 v2 为 Ref/Doc 分别携带正文 identity 与 HEAD baseline；整包事务锁保持不变，另一棵树变化不再制造假冲突，同树变化仍严格拒绝。Ref 和 dirty checkout 在 CLI 入口 fail closed，Agent commit 强制声明 actor.type=agent 和精确 bind。源码构建与仓库外 tarball 安装均重复 22 项真实子进程回归并通过；安装版 VSIX + 个人 preview.2 runtime 的完整联调也为 22/22。见 [D019](./decisions.md#d019agent-tool-完整命令面用户批准与按树冲突隔离)。
 
-2026-09-09 Agent 成果已通过 `6e41aaa` 推送；可选 [`mdv` 个人 Skill](../../adapter/mdv_agent_tool/skills/mdv/SKILL.md) 通过 `07ab810` 推送并按用户要求安装到本机，从技能位置调用独立 CLI。Codex 项目内/外均识别为启用的 user skill，个人运行时在仓库外 19/19 通过。它仅负责跨项目发现和调用，不改变默认权限，也不扩展为 MCP 服务；安装证据与尚未完成的 GUI/平台边界见[开发日志](./dev_log.md)。
+2026-09-09 的 A0/A1 与初版个人 Skill 已分别通过 `6e41aaa`、`07ab810` 推送并安装验证；这些是历史交付证据。2026-09-10 已用本地 tarball 将现有个人 runtime 升级到 preview.2，并同步当前 Skill 的命令、baseline、Ref 可见确认和 Git/MDV commit 区分；安装后版本、Skill 文件一致性及对真实 AnimeVAG 文档的 `status` 均核对通过。它仍不扩展为 MCP 服务或绕过宿主文件权限，当前会话的 Skill 发现缓存可能要到下一轮才反映更新。
 
 ## 页面
 

@@ -3,3 +3,8 @@ node_modules/
 *.tsbuildinfo
 .DS_Store
 
+# @byted-motor/aicoding-telemetry: git-hook run log (do not commit)
+.motor-code/log/
+
+# Local promotional animation workspace and rendered outputs
+/docs/design/promotional-animation/

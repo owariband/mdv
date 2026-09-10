@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { createMdv, openMdv, verifyMdv } from '@owariband/mdv'
 
 const cli = process.env.MDV_AGENT_CLI ?? fileURLToPath(new URL('../dist/cli.cjs', import.meta.url))
 const workingDirectory = process.env.MDV_AGENT_TEST_CWD ?? process.cwd()
-const actor = { type: 'human', name: 'Fixture author' }
+const human = { type: 'human', name: 'Fixture author' }
+const agent = { type: 'agent', name: 'Test Agent' }
+const PNG = Buffer.from('89504e470d0a1a0a0000000d494844520000000100000001', 'hex')
 
 function invoke(args, input, closeOutput = false) {
   return new Promise((done, fail) => {
@@ -41,13 +44,24 @@ async function fixture(t) {
   const file = join(root, '需求 # draft.mdv')
   let document = await createMdv(file)
   document = await document.saveReference({ markdown: 'Reference v1\r\n', expectedGeneration: 0 })
-  const r1 = await document.commitReference({ expectedGeneration: document.manifest.generation, actor, summary: 'Reference one' })
+  const r1 = await document.commitReference({ expectedGeneration: document.manifest.generation, actor: human, summary: 'Reference one' })
   document = await r1.document.saveReference({ markdown: 'Reference v2\n', expectedGeneration: r1.document.manifest.generation })
-  const r2 = await document.commitReference({ expectedGeneration: document.manifest.generation, actor, summary: 'Reference two' })
+  const r2 = await document.commitReference({ expectedGeneration: document.manifest.generation, actor: human, summary: 'Reference two' })
   document = await r2.document.saveDocument({ markdown: 'Historical Doc\r\n', expectedGeneration: r2.document.manifest.generation })
-  const d1 = await document.commitDocument({ expectedGeneration: document.manifest.generation, actor, summary: 'Uses older Ref', referenceVersion: r1.version })
-  document = await d1.document.saveReference({ markdown: 'Current Ref draft\nactual document:\nnot a protocol field', expectedGeneration: d1.document.manifest.generation })
-  document = await document.saveDocument({ markdown: '# Current Doc\r\n中文 e\u0301  \r\nno EOF newline', expectedGeneration: document.manifest.generation })
+  const d1 = await document.commitDocument({
+    expectedGeneration: document.manifest.generation,
+    actor: human,
+    summary: 'Uses older Ref',
+    referenceVersion: r1.version,
+  })
+  document = await d1.document.saveReference({
+    markdown: 'Current Ref draft\nactual document:\nnot a protocol field',
+    expectedGeneration: d1.document.manifest.generation,
+  })
+  document = await document.saveDocument({
+    markdown: '# Current Doc\r\n中文 e\u0301  \r\nno EOF newline',
+    expectedGeneration: document.manifest.generation,
+  })
   return { root, file, document, r1: r1.version, r2: r2.version, d1: d1.version }
 }
 
@@ -55,7 +69,7 @@ function result(value) {
   assert.equal(value.code, 0, value.stdout + value.stderr)
   assert.equal(value.stderr, '')
   const json = JSON.parse(value.stdout)
-  assert.equal(json.protocolVersion, 1)
+  assert.equal(json.protocolVersion, 2)
   assert.equal(json.ok, true)
   return json.data
 }
@@ -64,237 +78,416 @@ function rejected(value, code, exitCode) {
   assert.equal(value.code, exitCode, value.stdout + value.stderr)
   assert.equal(value.stderr, '')
   const json = JSON.parse(value.stdout)
+  assert.equal(json.protocolVersion, 2)
   assert.equal(json.ok, false)
   assert.equal(json.error.code, code)
   return json.error
 }
 
-const request = (document, markdown) => ({ expectedDocumentId: document.manifest.documentId,
-  expectedGeneration: document.manifest.generation, markdown })
+const json = (command, file, request, ...flags) => invoke(
+  [command, '--file', file, '--input', '-', ...flags], JSON.stringify(request),
+)
 const read = (file, ...args) => invoke(['read', '--file', file, '--json', ...args])
-const save = (file, input, closeOutput = false) => invoke(['save-document', '--file', file, '--input', '-'], JSON.stringify(input), closeOutput)
+const current = async (file) => result(await read(file))
+const save = (file, tree, baseline, markdown, ...flags) => json(
+  `save-${tree}`, file, { baseline, markdown }, ...flags,
+)
+const commit = (file, tree, baseline, summary, referenceVersion, ...flags) => json(
+  `commit-${tree}`, file,
+  { baseline, summary, actor: agent, ...(tree === 'document' ? { referenceVersion } : {}) },
+  ...flags,
+)
+const checkout = (file, tree, baseline, version, discardChanges, ...flags) => json(
+  `checkout-${tree}`, file, { baseline, version, discardChanges }, ...flags,
+)
 
-test('help and version describe the actual narrow default permissions', async () => {
+test('help and version describe the complete permission-aware command surface', async () => {
   const help = await invoke(['--help'])
   assert.equal(help.code, 0)
-  assert.match(help.stdout, /Ref and committed history are read-only/)
-  assert.match(help.stdout, /expectedDocumentId, expectedGeneration, markdown/)
-  assert.match((await invoke(['--version'])).stdout, /^0\.1\.0-preview\.1\n$/)
+  assert.match(help.stdout, /commit-document/)
+  assert.match(help.stdout, /save-reference/)
+  assert.match(help.stdout, /user-approved-reference-write/)
+  assert.match(help.stdout, /target tree content/)
+  assert.equal((await invoke(['--version'])).stdout, '0.1.0-preview.2\n')
 })
 
-test('one JSON read returns both current drafts, exact strings and a reusable baseline without mutation', async (t) => {
+test('current read returns exact paired text and independent reusable baselines without mutation', async (t) => {
   const { file, document } = await fixture(t)
   const before = await readFile(file)
-  const data = result(await read(file))
+  const data = await current(file)
   assert.equal(data.documentId, document.manifest.documentId)
   assert.equal(data.generation, document.manifest.generation)
-  assert.equal(data.baseDirectory, document.baseDirectory)
   assert.equal(data.reference.text, await document.readReferenceText())
   assert.equal(data.document.text, await document.readDocumentText())
-  assert.deepEqual(data.reference.source, { tree: 'reference', kind: 'working-copy' })
-  assert.deepEqual(data.document.source, { tree: 'document', kind: 'working-copy' })
-  assert.deepEqual(data.permissions, { reference: 'read-only', document: 'read-write' })
+  assert.deepEqual(data.permissions, { reference: 'approval-required', document: 'read-write' })
+  for (const [tree, text] of [['reference', data.reference.text], ['document', data.document.text]]) {
+    assert.equal(data[tree].baseline.documentId, data.documentId)
+    assert.equal(data[tree].baseline.generation, data.generation)
+    assert.equal(data[tree].baseline.tree, tree)
+    assert.equal(data[tree].baseline.contentBytes, Buffer.byteLength(text))
+    assert.equal(data[tree].baseline.contentSha256, createHash('sha256').update(text).digest('hex'))
+  }
   assert.deepEqual(await readFile(file), before)
 })
 
-test('ordinary text reads have the fixed reference/actual headings and display the save baseline', async (t) => {
+test('text reads retain fixed headings and expose copyable per-tree baselines', async (t) => {
   const { file, document } = await fixture(t)
   const value = await invoke(['read', '--file', file])
   assert.equal(value.code, 0)
-  assert.equal(value.stderr, '')
-  assert.ok(value.stdout.includes('documentId: ' + document.manifest.documentId))
-  assert.ok(value.stdout.includes('generation: ' + document.manifest.generation))
+  assert.match(value.stdout, /reference baseline: \{"documentId":"d_/)
+  assert.match(value.stdout, /document baseline: \{"documentId":"d_/)
   assert.ok(value.stdout.includes('\n\nreference document:\n' + await document.readReferenceText()))
   assert.ok(value.stdout.endsWith('\n\nactual document:\n' + await document.readDocumentText() + '\n'))
 })
 
-test('historical reads pair a Doc with its exact older bound Ref, not the current Ref', async (t) => {
+test('historical reads pair a Document with its exact bound Reference and remain read-only', async (t) => {
   const { file, d1, r1 } = await fixture(t)
-  const before = await readFile(file)
   const data = result(await read(file, '--document-version', d1))
   assert.equal(data.reference.text, 'Reference v1\r\n')
   assert.equal(data.document.text, 'Historical Doc\r\n')
   assert.deepEqual(data.reference.source, { tree: 'reference', kind: 'version', version: r1 })
   assert.deepEqual(data.document.source, { tree: 'document', kind: 'version', version: d1 })
-  assert.equal(data.permissions.document, 'read-only')
-  assert.deepEqual(await readFile(file), before)
+  assert.deepEqual(data.permissions, { reference: 'read-only', document: 'read-only' })
+  assert.equal(data.reference.baseline, undefined)
+  assert.equal(data.document.baseline, undefined)
 })
 
-test('unbound historical Docs do not silently receive an unrelated Ref', async (t) => {
-  const { file, document } = await fixture(t)
-  const committed = await document.commitDocument({ expectedGeneration: document.manifest.generation, actor, summary: 'Unbound', referenceVersion: null })
-  const data = result(await read(file, '--document-version', committed.version))
-  assert.deepEqual(data.reference, { source: null, text: '' })
-  assert.equal(data.document.text, await document.readDocumentText())
-  assert.match((await invoke(['read', '--file', file, '--document-version', committed.version])).stdout, /reference source: unbound/)
+test('status, versions, trace, diff and verify expose the Core query surface', async (t) => {
+  const { file, document, r1, d1 } = await fixture(t)
+  const state = result(await invoke(['status', '--file', file]))
+  assert.equal(state.documentId, document.manifest.documentId)
+  assert.equal(state.status.reference.dirty, true)
+  assert.equal(state.status.document.dirty, true)
+  assert.equal(state.baselines.reference.tree, 'reference')
+  assert.equal(state.baselines.document.tree, 'document')
+
+  const documentVersions = result(await invoke(['versions', '--file', file, '--tree', 'document']))
+  assert.deepEqual(documentVersions.versions.map(({ id }) => id), [d1])
+  const documentTrace = result(await invoke(['trace', '--file', file, '--tree', 'document', '--version-id', d1]))
+  assert.equal(documentTrace.trace.reference.id, r1)
+
+  const review = result(await json('diff', file, {
+    from: { tree: 'document', kind: 'version', version: d1 },
+    to: { tree: 'document', kind: 'working-copy' },
+    contextLines: 2,
+  }))
+  assert.match(review.result.unifiedText, /Current Doc/)
+  const report = result(await invoke(['verify', '--file', file, '--mode', 'full']))
+  assert.equal(report.report.valid, true)
 })
 
-test('an empty filesystem-created document reads without writes, then saves only Doc with no version', async (t) => {
-  const file = join(await directory(t), 'empty.mdv')
-  await writeFile(file, '')
-  const data = result(await read(file))
-  assert.equal(data.reference.text, '')
-  assert.equal(data.document.text, '')
-  assert.equal(data.generation, 0)
-  assert.equal((await readFile(file)).length, 0)
-  const saved = result(await save(file, { expectedDocumentId: data.documentId, expectedGeneration: 0, markdown: '# First Doc\r\n' }))
-  const document = await openMdv(file)
-  assert.equal(saved.generation, 1)
-  assert.equal(saved.documentId, data.documentId)
-  assert.equal(await document.readReferenceText(), '')
-  assert.equal(await document.readDocumentText(), '# First Doc\r\n')
-  assert.deepEqual(document.listVersions(), [])
-  assert.equal((await verifyMdv(file, { mode: 'full' })).valid, true)
+test('Document save, explicit commit and clean checkout form one complete lifecycle', async (t) => {
+  const { file, r2, d1 } = await fixture(t)
+  const readData = await current(file)
+  const saved = result(await save(file, 'document', readData.document.baseline, '# Agent draft\n'))
+  assert.equal(saved.baseline.tree, 'document')
+  assert.equal(saved.baseline.head, d1)
+
+  const committed = result(await commit(file, 'document', saved.baseline, 'Agent version', r2))
+  assert.equal(committed.created, true)
+  assert.match(committed.version, /^v_[0-9a-f]{32}$/)
+  let document = await openMdv(file)
+  assert.equal(document.documentTree.head, committed.version)
+  assert.deepEqual(document.listVersions({ tree: 'document' }).at(-1).actor, agent)
+  assert.equal(document.getDocumentReference(committed.version), r2)
+
+  const restored = result(await checkout(file, 'document', committed.baseline, d1, false))
+  assert.equal(restored.restoredVersion, d1)
+  document = await openMdv(file)
+  assert.equal(document.documentTree.head, d1)
+  assert.equal(await document.readDocumentText(), 'Historical Doc\r\n')
 })
 
-test('save-document preserves Ref, both HEADs, every version and bind while saving exact Markdown', async (t) => {
-  const { file, document } = await fixture(t)
-  const versions = document.listVersions()
-  const content = await Promise.all(versions.map((entry) => document.readVersionText(entry.id)))
-  const markdown = '---\r\ntitle: 文档\r\n---\r\n# Actual\n![image](../assets/a.png)\r\n```md\nreference document:\n```\n e\u0301  '
-  const saved = result(await save(file, request(document, markdown)))
-  const next = await openMdv(file)
-  assert.equal(saved.generation, document.manifest.generation + 1)
-  assert.equal(await next.readDocumentText(), markdown)
-  assert.equal(await next.readReferenceText(), await document.readReferenceText())
-  assert.deepEqual(next.referenceTree, document.referenceTree)
-  assert.deepEqual(next.documentTree, document.documentTree)
-  assert.deepEqual(next.listVersions(), versions)
-  assert.deepEqual(await Promise.all(versions.map((entry) => next.readVersionText(entry.id))), content)
-  assert.equal((await verifyMdv(file, { mode: 'full' })).valid, true)
-})
-
-test('JSON file input and relative MDV paths work, including an empty Doc replacement', async (t) => {
-  const { file, root, document } = await fixture(t)
-  const input = join(root, 'request 中文.json')
-  await writeFile(input, JSON.stringify(request(document, '')))
-  result(await invoke(['save-document', '--file', file, '--input', input, '--json']))
-  assert.equal(await (await openMdv(file)).readDocumentText(), '')
-  const { relative } = await import('node:path')
-  assert.equal(result(await read(relative(workingDirectory, file))).document.text, '')
-})
-
-test('stale generations are not replaced by the generation observed during a new open', async (t) => {
-  const { file, document } = await fixture(t)
-  await document.saveReference({ markdown: 'User updated Ref', expectedGeneration: document.manifest.generation })
+test('Document commits reject implicit binding and agents posing as humans', async (t) => {
+  const { file } = await fixture(t)
+  const data = await current(file)
   const before = await readFile(file)
-  const error = rejected(await save(file, request(document, 'stale generated Doc')), 'CONFLICT', 3)
-  assert.equal(error.origin, 'core')
+  const missing = { baseline: data.document.baseline, summary: 'No bind', actor: agent }
+  rejected(await json('commit-document', file, missing), 'INVALID_ARGUMENT', 2)
+  rejected(await json('commit-document', file,
+    { ...missing, actor: { type: 'human' }, referenceVersion: null }), 'INVALID_ARGUMENT', 2)
   assert.deepEqual(await readFile(file), before)
 })
 
-test('two CLI writers with the same baseline produce exactly one successful save', async (t) => {
-  const { file, document } = await fixture(t)
-  const values = await Promise.all(['first', 'second'].map((text) => save(file, request(document, text))))
-  assert.deepEqual(values.map((value) => value.code).sort(), [0, 3])
-  rejected(values.find((value) => value.code !== 0), 'CONFLICT', 3)
-  const next = await openMdv(file)
-  assert.equal(next.manifest.generation, document.manifest.generation + 1)
-  assert.equal(await next.readDocumentText(), values[0].code === 0 ? 'first' : 'second')
-  assert.equal(await next.readReferenceText(), await document.readReferenceText())
+test('all Reference writes fail closed until the visible-approval flag is supplied', async (t) => {
+  const { file, r1 } = await fixture(t)
+  const data = await current(file)
+  const before = await readFile(file)
+  const saveRequest = { baseline: data.reference.baseline, markdown: '# Approved Ref\n' }
+  const approval = rejected(await json('save-reference', file, saveRequest), 'USER_APPROVAL_REQUIRED', 4)
+  assert.deepEqual(approval.requiredApproval, { scope: 'reference-write', action: 'save-reference', file })
+  assert.deepEqual(await readFile(file), before)
+
+  const saved = result(await json('save-reference', file, saveRequest, '--user-approved-reference-write'))
+  const commitRequest = { baseline: saved.baseline, summary: 'Agent Ref', actor: agent }
+  rejected(await json('commit-reference', file, commitRequest), 'USER_APPROVAL_REQUIRED', 4)
+  const committed = result(await json('commit-reference', file, commitRequest, '--user-approved-reference-write'))
+  assert.equal(committed.created, true)
+  const checkoutRequest = { baseline: committed.baseline, version: r1, discardChanges: false }
+  rejected(await json('checkout-reference', file, checkoutRequest), 'USER_APPROVAL_REQUIRED', 4)
+  const restored = result(await checkout(file, 'reference', committed.baseline, r1, false,
+    '--user-approved-reference-write'))
+  assert.equal(restored.restoredVersion, r1)
 })
 
-test('another document at the same path and generation cannot inherit the previous read baseline', async (t) => {
+test('discarding dirty working copies requires a second explicit approval', async (t) => {
+  const { file, d1, r1 } = await fixture(t)
+  const data = await current(file)
+  const request = { baseline: data.document.baseline, version: d1, discardChanges: true }
+  const before = await readFile(file)
+  const approval = rejected(await json('checkout-document', file, request), 'USER_APPROVAL_REQUIRED', 4)
+  assert.equal(approval.requiredApproval.scope, 'discard-working-copy')
+  assert.deepEqual(await readFile(file), before)
+  result(await json('checkout-document', file, request, '--user-approved-discard'))
+  assert.equal(await (await openMdv(file)).readDocumentText(), 'Historical Doc\r\n')
+
+  const referenceRequest = { baseline: data.reference.baseline, version: r1, discardChanges: true }
+  const referenceApproval = rejected(await json('checkout-reference', file, referenceRequest,
+    '--user-approved-reference-write'), 'USER_APPROVAL_REQUIRED', 4)
+  assert.equal(referenceApproval.requiredApproval.scope, 'discard-working-copy')
+  result(await json('checkout-reference', file, referenceRequest,
+    '--user-approved-reference-write', '--user-approved-discard'))
+  assert.equal(await (await openMdv(file)).readReferenceText(), 'Reference v1\r\n')
+})
+
+test('different-tree changes rebase stale generations without creating false conflicts', async (t) => {
+  const first = await fixture(t)
+  const firstRead = await current(first.file)
+  await first.document.saveReference({ markdown: '# User changed only Ref\n', expectedGeneration: first.document.manifest.generation })
+  result(await save(first.file, 'document', firstRead.document.baseline, '# Doc survives Ref write\n'))
+  let reopened = await openMdv(first.file)
+  assert.equal(await reopened.readReferenceText(), '# User changed only Ref\n')
+  assert.equal(await reopened.readDocumentText(), '# Doc survives Ref write\n')
+
+  const second = await fixture(t)
+  const secondRead = await current(second.file)
+  await second.document.saveDocument({ markdown: '# User changed only Doc\n', expectedGeneration: second.document.manifest.generation })
+  result(await save(second.file, 'reference', secondRead.reference.baseline, '# Ref survives Doc write\n',
+    '--user-approved-reference-write'))
+  reopened = await openMdv(second.file)
+  assert.equal(await reopened.readDocumentText(), '# User changed only Doc\n')
+  assert.equal(await reopened.readReferenceText(), '# Ref survives Doc write\n')
+})
+
+test('same-tree changes reject stale baselines without overwriting the winner', async (t) => {
+  const { file, document } = await fixture(t)
+  const data = await current(file)
+  await document.saveDocument({ markdown: '# Winner\n', expectedGeneration: document.manifest.generation })
+  const before = await readFile(file)
+  const error = rejected(await save(file, 'document', data.document.baseline, '# Loser\n'), 'CONFLICT', 3)
+  assert.equal(error.origin, 'adapter')
+  assert.equal(error.details.reason, 'working-copy-changed')
+  assert.deepEqual(await readFile(file), before)
+  assert.equal(await (await openMdv(file)).readDocumentText(), '# Winner\n')
+
+  const referenceFixture = await fixture(t)
+  const referenceData = await current(referenceFixture.file)
+  await referenceFixture.document.saveReference({
+    markdown: '# Reference winner\n',
+    expectedGeneration: referenceFixture.document.manifest.generation,
+  })
+  const referenceBefore = await readFile(referenceFixture.file)
+  const referenceError = rejected(await save(referenceFixture.file, 'reference',
+    referenceData.reference.baseline, '# Reference loser\n', '--user-approved-reference-write'), 'CONFLICT', 3)
+  assert.equal(referenceError.details.reason, 'working-copy-changed')
+  assert.deepEqual(await readFile(referenceFixture.file), referenceBefore)
+  assert.equal(await (await openMdv(referenceFixture.file)).readReferenceText(), '# Reference winner\n')
+})
+
+test('cross-process Ref and Doc saves serialize physically but both complete logically', async (t) => {
+  const { file } = await fixture(t)
+  const data = await current(file)
+  const [documentWrite, referenceWrite] = await Promise.all([
+    save(file, 'document', data.document.baseline, '# Concurrent Doc\n'),
+    save(file, 'reference', data.reference.baseline, '# Concurrent Ref\n', '--user-approved-reference-write'),
+  ])
+  result(documentWrite)
+  result(referenceWrite)
+  const reopened = await openMdv(file)
+  assert.equal(await reopened.readDocumentText(), '# Concurrent Doc\n')
+  assert.equal(await reopened.readReferenceText(), '# Concurrent Ref\n')
+})
+
+test('cross-process commits on different trees do not create false conflicts', async (t) => {
+  const { file, r2 } = await fixture(t)
+  const data = await current(file)
+  const [documentCommit, referenceCommit] = await Promise.all([
+    commit(file, 'document', data.document.baseline, 'Concurrent Doc commit', r2),
+    commit(file, 'reference', data.reference.baseline, 'Concurrent Ref commit', undefined,
+      '--user-approved-reference-write'),
+  ])
+  assert.equal(result(documentCommit).created, true)
+  assert.equal(result(referenceCommit).created, true)
+  const reopened = await openMdv(file)
+  assert.equal(reopened.listVersions({ tree: 'document' }).length, 2)
+  assert.equal(reopened.listVersions({ tree: 'reference' }).length, 3)
+})
+
+test('two writers using one Document baseline still produce exactly one winner', async (t) => {
+  const { file } = await fixture(t)
+  const data = await current(file)
+  const values = await Promise.all(['first', 'second'].map((text) =>
+    save(file, 'document', data.document.baseline, text)))
+  assert.deepEqual(values.map(({ code }) => code).sort(), [0, 3])
+  rejected(values.find(({ code }) => code !== 0), 'CONFLICT', 3)
+  const reopened = await openMdv(file)
+  assert.ok(['first', 'second'].includes(await reopened.readDocumentText()))
+
+  const referenceFixture = await fixture(t)
+  const referenceData = await current(referenceFixture.file)
+  const referenceValues = await Promise.all(['ref first', 'ref second'].map((text) =>
+    save(referenceFixture.file, 'reference', referenceData.reference.baseline, text,
+      '--user-approved-reference-write')))
+  assert.deepEqual(referenceValues.map(({ code }) => code).sort(), [0, 3])
+  rejected(referenceValues.find(({ code }) => code !== 0), 'CONFLICT', 3)
+  const referenceReopened = await openMdv(referenceFixture.file)
+  assert.ok(['ref first', 'ref second'].includes(await referenceReopened.readReferenceText()))
+})
+
+test('history operations reject a same-tree HEAD change even when content stayed identical', async (t) => {
+  const { file, document, r2 } = await fixture(t)
+  const data = await current(file)
+  const external = await document.commitDocument({
+    expectedGeneration: document.manifest.generation,
+    actor: human,
+    summary: 'External commit',
+    referenceVersion: r2,
+  })
+  const before = await readFile(file)
+  const error = rejected(await commit(file, 'document', data.document.baseline, 'Stale parent', r2), 'CONFLICT', 3)
+  assert.equal(error.details.reason, 'head-changed')
+  assert.deepEqual(await readFile(file), before)
+  assert.equal((await openMdv(file)).documentTree.head, external.version)
+
+  const referenceFixture = await fixture(t)
+  const referenceData = await current(referenceFixture.file)
+  const externalReference = await referenceFixture.document.commitReference({
+    expectedGeneration: referenceFixture.document.manifest.generation,
+    actor: human,
+    summary: 'External reference commit',
+  })
+  const referenceBefore = await readFile(referenceFixture.file)
+  const referenceError = rejected(await commit(referenceFixture.file, 'reference',
+    referenceData.reference.baseline, 'Stale reference parent', undefined,
+    '--user-approved-reference-write'), 'CONFLICT', 3)
+  assert.equal(referenceError.details.reason, 'head-changed')
+  assert.deepEqual(await readFile(referenceFixture.file), referenceBefore)
+  assert.equal((await openMdv(referenceFixture.file)).referenceTree.head, externalReference.version)
+})
+
+test('another document at the same path cannot inherit any previous tree baseline', async (t) => {
   const root = await directory(t)
   const file = join(root, 'target.mdv')
-  const old = await createMdv(file)
+  await createMdv(file)
+  const data = await current(file)
   const replacement = join(root, 'replacement.mdv')
   await createMdv(replacement)
   await rename(replacement, file)
   const before = await readFile(file)
-  rejected(await save(file, request(old, 'must not save')), 'CONFLICT', 3)
+  rejected(await save(file, 'document', data.document.baseline, 'must not save'), 'CONFLICT', 3)
   assert.deepEqual(await readFile(file), before)
 })
 
-test('default commands reject all Ref, history and resource mutations before touching the package', async (t) => {
+test('create and managed-resource commands work without changing archive generation', async (t) => {
+  const root = await directory(t)
+  const file = join(root, 'created.mdv')
+  const created = result(await invoke(['create', '--file', file, '--markdown-profile', 'gfm']))
+  assert.equal(created.generation, 0)
+  const image = join(root, 'cat.png')
+  await writeFile(image, PNG)
+  const imported = result(await json('import-resource', file, {
+    expectedDocumentId: created.documentId,
+    sourceFile: image,
+    mediaType: 'image/png',
+  }))
+  assert.equal(imported.generation, 0)
+  assert.match(imported.relativePath, /^\.\/\.mdv-assets\/d_[0-9a-f]{32}\/[0-9a-f]{64}\.png$/)
+  const resolved = result(await json('resolve-resource', file, {
+    expectedDocumentId: created.documentId,
+    relativePath: imported.relativePath,
+  }))
+  assert.equal(resolved.path, await realpath(join(root, imported.relativePath)))
+  const verified = result(await json('verify-resource', file, {
+    expectedDocumentId: created.documentId,
+    relativePath: imported.relativePath,
+  }))
+  assert.equal(verified.verified, true)
+  assert.equal((await openMdv(file)).manifest.generation, 0)
+})
+
+test('invalid baselines, command fields, flags and paths fail before writes', async (t) => {
   const { file } = await fixture(t)
+  const data = await current(file)
   const before = await readFile(file)
-  for (const action of ['save-reference', 'commit-reference', 'commit-document', 'checkout-reference', 'checkout-document', 'import-resource', 'create']) {
-    rejected(await invoke([action, '--file', file]), 'PERMISSION_DENIED', 4)
-  }
+  for (const request of [
+    {},
+    { baseline: data.reference.baseline, markdown: 'wrong tree' },
+    { baseline: { ...data.document.baseline, contentSha256: 'bad' }, markdown: 'bad hash' },
+    { baseline: data.document.baseline, markdown: null },
+    { baseline: data.document.baseline, markdown: 'x', permissions: {} },
+  ]) rejected(await json('save-document', file, request), 'INVALID_ARGUMENT', 2)
+  rejected(await invoke(['read', '--file', file, '--user-approved-reference-write']), 'INVALID_ARGUMENT', 2)
+  rejected(await invoke(['trace', '--file', file, '--tree', 'document']), 'INVALID_ARGUMENT', 2)
+  rejected(await json('resolve-resource', file, {
+    expectedDocumentId: data.documentId,
+    relativePath: './.mdv-assets/not-a-managed-path.png',
+    maxBytes: 1,
+  }), 'INVALID_ARGUMENT', 2)
+  rejected(await invoke(['read', '--file', 'mdv:/virtual.mdv']), 'INVALID_ARGUMENT', 2)
+  rejected(await invoke(['read', '--file', 'https://example.com/file.mdv']), 'INVALID_ARGUMENT', 2)
   assert.deepEqual(await readFile(file), before)
 })
 
-test('missing or invalid baselines and extra capability/tree fields cannot enter the writer', async (t) => {
-  const { file, document } = await fixture(t)
-  const before = await readFile(file)
-  const valid = request(document, 'replacement')
-  for (const input of [null, [], {}, { ...valid, expectedDocumentId: 'd_invalid' },
-    { ...valid, expectedGeneration: -1 }, { ...valid, expectedGeneration: 1.5 },
-    { ...valid, expectedGeneration: '8' }, { ...valid, markdown: null },
-    { ...valid, tree: 'reference' }, { ...valid, permissions: { reference: 'write' } },
-    { ...valid, reference: 'overwrite Ref' }, { ...valid, referenceVersion: null },
-    { ...valid, expectedDocumentId: undefined }, { ...valid, expectedGeneration: undefined }]) {
-    rejected(await save(file, input), 'INVALID_ARGUMENT', 2)
-  }
-  rejected(await save(file, { ...valid, markdown: '\ud800' }), 'INVALID_UTF8', 2)
-  assert.deepEqual(await readFile(file), before)
-})
-
-test('history-targeted saves, duplicate flags, unknown flags and malformed versions fail closed', async (t) => {
-  const { file, document, d1, r1 } = await fixture(t)
-  const before = await readFile(file)
-  rejected(await invoke(['save-document', '--file', file, '--document-version', d1, '--input', '-'], JSON.stringify(request(document, 'bad'))), 'PERMISSION_DENIED', 4)
-  for (const args of [[], ['read'], ['read', '--file', file, '--file', file], ['read', '--file', file, '--allow-reference-write'],
-    ['read', '--file', file, '--input', '-'], ['read', '--file', 'mdv:/virtual.mdv'], ['read', '--file', 'https://example.com/file.mdv'],
-    ['read', '--file', file, '--document-version', 'nope'], ['save-document', '--file', file], ['read', '--help']]) {
-    rejected(await invoke(args), 'INVALID_ARGUMENT', 2)
-  }
-  rejected(await read(file, '--document-version', r1), 'NOT_FOUND', 3)
-  assert.deepEqual(await readFile(file), before)
-})
-
-test('malformed JSON, invalid UTF-8, BOM and unreadable inputs fail without writes', async (t) => {
-  const { file, document, root } = await fixture(t)
-  const before = await readFile(file)
-  for (const input of ['', '{', '\ufeff' + JSON.stringify(request(document, 'bad'))]) {
-    rejected(await invoke(['save-document', '--file', file, '--input', '-'], input), 'INVALID_ARGUMENT', 2)
+test('JSON files, relative paths, malformed input and UTF-8 errors retain clear boundaries', async (t) => {
+  const { file, root } = await fixture(t)
+  const data = await current(file)
+  const input = join(root, 'request 中文.json')
+  await writeFile(input, JSON.stringify({ baseline: data.document.baseline, markdown: '' }))
+  result(await invoke(['save-document', '--file', relative(workingDirectory, file), '--input', input]))
+  assert.equal(await (await openMdv(file)).readDocumentText(), '')
+  for (const body of ['', '{', '\ufeff' + JSON.stringify({ baseline: data.document.baseline, markdown: 'bad' })]) {
+    rejected(await invoke(['save-document', '--file', file, '--input', '-'], body), 'INVALID_ARGUMENT', 2)
   }
   rejected(await invoke(['save-document', '--file', file, '--input', '-'], Buffer.from([0xff])), 'INVALID_UTF8', 2)
   rejected(await invoke(['save-document', '--file', file, '--input', join(root, 'missing.json')]), 'IO_ERROR', 3)
-  rejected(await invoke(['save-document', '--file', file, '--input', root]), 'INVALID_ARGUMENT', 2)
-  assert.deepEqual(await readFile(file), before)
 })
 
-test('input budgets are enforced on both stdin and JSON files before saving', async (t) => {
-  const { file, root } = await fixture(t)
+test('input and escaped-output budgets fail closed without partial successful data', async (t) => {
+  const { file } = await fixture(t)
   const before = await readFile(file)
-  const input = Buffer.alloc(16 * 1024 * 1024 + 1, 32)
-  rejected(await invoke(['save-document', '--file', file, '--input', '-'], input), 'LIMIT_EXCEEDED', 2)
-  const json = join(root, 'large.json')
-  await writeFile(json, input)
-  rejected(await invoke(['save-document', '--file', file, '--input', json]), 'LIMIT_EXCEEDED', 2)
+  rejected(await invoke(['save-document', '--file', file, '--input', '-'], Buffer.alloc(16 * 1024 * 1024 + 1, 32)),
+    'LIMIT_EXCEEDED', 2)
   assert.deepEqual(await readFile(file), before)
-})
 
-test('JSON-escaped output is budgeted and never returned as a successful partial pair', async (t) => {
-  const file = join(await directory(t), 'large.mdv')
-  let document = await createMdv(file)
+  const large = join(await directory(t), 'large.mdv')
+  let document = await createMdv(large)
   document = await document.saveReference({ markdown: '"'.repeat(16 * 1024 * 1024), expectedGeneration: 0 })
-  const before = await readFile(file)
-  const value = await read(file)
-  rejected(value, 'LIMIT_EXCEEDED', 2)
-  assert.ok(value.stdout.length < 1000)
-  assert.deepEqual(await readFile(file), before)
+  const output = await read(large)
+  rejected(output, 'LIMIT_EXCEEDED', 2)
+  assert.ok(output.stdout.length < 1000)
 })
 
-test('missing and malformed archives retain Core error codes and never initialize nonempty input', async (t) => {
+test('missing and malformed archives retain diagnostic behavior', async (t) => {
   const root = await directory(t)
   rejected(await read(join(root, 'missing.mdv')), 'NOT_FOUND', 3)
   const file = join(root, 'bad.mdv')
   await writeFile(file, 'not a ZIP')
   rejected(await read(file), 'INVALID_ARCHIVE', 3)
+  const report = result(await invoke(['verify', '--file', file]))
+  assert.equal(report.report.valid, false)
   assert.equal(await readFile(file, 'utf8'), 'not a ZIP')
 })
 
-test('closed stdout reports delivery failure without implying a successful save was rolled back', async (t) => {
-  const { file, document } = await fixture(t)
-  const value = await save(file, request(document, 'saved before pipe failure'), true)
+test('closed stdout reports delivery uncertainty without implying rollback', async (t) => {
+  const { file } = await fixture(t)
+  const data = await current(file)
+  const value = await invoke(
+    ['save-document', '--file', file, '--input', '-'],
+    JSON.stringify({ baseline: data.document.baseline, markdown: 'saved before pipe failure' }),
+    true,
+  )
   assert.equal(value.code, 1, value.stderr)
   assert.match(value.stderr, /MDV OUTPUT_ERROR/)
-  assert.doesNotMatch(value.stderr, /at .*\.cjs|Unhandled/)
-  const next = await openMdv(file)
-  assert.equal(next.manifest.generation, document.manifest.generation + 1)
-  assert.equal(await next.readDocumentText(), 'saved before pipe failure')
-  assert.equal(await next.readReferenceText(), await document.readReferenceText())
+  assert.equal(await (await openMdv(file)).readDocumentText(), 'saved before pipe failure')
+  assert.equal((await verifyMdv(file, { mode: 'full' })).valid, true)
 })

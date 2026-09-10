@@ -26,7 +26,7 @@
 12. Public `interface` 只描述调用方实际消费的对象契约；泛型只在能保留真实类型关系或复用同一校验逻辑时使用，不把“库”设计成多层通用框架。
 13. 普通编辑沿用 Markdown 的既有模型：宿主拥有内存 buffer，Core 只持久化 `current.md`。不引入 `DraftVersion`、`workspace`、pending bind 或另一套草稿状态机。
 
-2026-09-08 更新：独立上游不要求独立 Git 仓库；`adapter/mdv_vscode/` 已交付本地预览 VSIX，`adapter/mdv_agent_tool/` 仍仅有方案，均只依赖 Core package root。本地接入先于正式发布；插件复用原生 Markdown 编辑/渲染，不增加 Core renderer。见[插件方案](./vscode_plugin.md)、[工具方案](./agent_tool.md)、[D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 与 [D014](./decisions.md#d014vs-code-复用原生-markdown-编辑与渲染)。
+2026-09-10 更新：独立上游不要求独立 Git 仓库；`adapter/mdv_vscode/` 已交付本地预览 VSIX，`adapter/mdv_agent_tool/` 已交付协议 v2 本地预览，两者均只依赖 Core package root。本地接入先于正式发布；插件复用原生 Markdown 编辑/渲染，CLI 只编排 public API，均不增加 Core renderer 或第二套归档事务。见[插件方案](./vscode_plugin.md)、[工具方案](./agent_tool.md)、[D013](./decisions.md#d013adapter-同仓独立包与本地接入优先) 与 [D019](./decisions.md#d019agent-tool-完整命令面用户批准与按树冲突隔离)。
 
 ## 2. 责任边界
 
@@ -173,18 +173,18 @@ M5.5 的 `resource/model.ts` / `resource/store.ts` 分别承载图片的确定�
 
 ### 3.4 独立 CLI 上游项目
 
-计划中的 `adapter/mdv_agent_tool/` 独立包负责（此前统称 `mdv-cli`）：
+已实现的 `adapter/mdv_agent_tool/` 独立包负责（此前统称 `mdv-cli`）：
 
 - 把 argv、stdin 和文件输入转换成 public API 参数；
 - 调用从 `index.ts` 导出的 API；
 - 把 public result/error 转换为人类文本或稳定 JSON；
 - 设置退出码，并保持 stdout/stderr 边界。
 
-CLI 不校验版本图、不拼 ZIP entry、不直接获得锁，也不复制 save/commit/checkout 规则。Core 的构建、测试和发布均不需要 CLI 存在；CLI 可以独立选择参数解析库、发布节奏和 Agent 装配协议。
+CLI 不校验版本图、不拼 ZIP entry、不直接获得锁，也不复制 save/commit/checkout 的领域规则。它可以基于 Core 返回的内容身份和 HEAD 编排一次性调用之间的按树 baseline，并在每次重试前重新核对依赖；真正的整包锁、generation CAS 和原子替换仍只属于 Core。Core 的构建、测试和发布均不需要 CLI 存在；CLI 独立维护参数、批准闸门、发布节奏和 Agent 装配协议。
 
 ## 4. 项目目录
 
-当前有根 `@owariband/mdv` 与独立的 `adapter/mdv_vscode/` 本地预览包，`adapter/mdv_agent_tool/` 尚未实现。不把 adapter 放入 Core `src/` 或发布产物；各自安装/构建/测试，不使用 workspace、不迁移到 `packages/`：
+当前有根 `@owariband/mdv` 与两个独立本地预览 adapter。不把 adapter 放入 Core `src/` 或发布产物；各自安装/构建/测试，不使用 workspace、不迁移到 `packages/`：
 
 ```text
 mdv/
@@ -192,7 +192,7 @@ mdv/
 ├── tsconfig.json
 ├── adapter/                       # 独立上游包
 │   ├── mdv_vscode/                 # 已实现，本地 VSIX
-│   └── mdv_agent_tool/             # 仅计划，尚未创建
+│   └── mdv_agent_tool/             # 已实现，一次性 Agent CLI + Skill
 ├── .github/workflows/ci.yml
 ├── scripts/
 │   ├── build-fixtures.mjs
@@ -289,7 +289,7 @@ mdv/
 }
 ```
 
-仓库/产物关系为（Core 与 VSIX 已实现，Agent CLI 仍为计划；公开发布另行验收）：
+仓库/产物关系为（三者均有本地实现；公开发布另行验收）：
 
 ```text
 mdv repository
@@ -1023,7 +1023,7 @@ VS Code extension 已作为首个本地图形客户端实现：可写虚拟 Mark
 
 ### 9.2 独立 Agent CLI 的上游边界
 
-CLI 的命令名、argv、stdin/stdout、JSON envelope、退出码、安装方式和 Agent tool schema 均属于独立 `adapter/mdv_agent_tool/` 包，在 [Agent Tool 方案](./agent_tool.md)中维护草案，不写入 Core 契约。
+CLI 的命令名、argv、stdin/stdout、JSON envelope、退出码、安装方式和 Agent tool schema 均属于独立 `adapter/mdv_agent_tool/` 包，在 [Agent Tool 方案](./agent_tool.md)中维护当前实现，不写入 Core 契约。协议 v2 的按树 baseline 与 Reference 用户批准是 adapter/宿主语义；它们不拆 Core 的整包物理锁，也不改变 Format 0.1。
 
 Core 只保证它需要的底层能力完整且稳定：
 

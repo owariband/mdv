@@ -41,7 +41,7 @@ mdv/
 │   │   ├── src/
 │   │   ├── test/
 │   │   └── README.md
-│   └── mdv_agent_tool/          # 独立成对读取/仅 Doc 保存工具；见配套方案
+│   └── mdv_agent_tool/          # 独立完整 Agent CLI；见配套方案
 └── docs/design/
     ├── vscode_plugin.md
     └── agent_tool.md
@@ -221,7 +221,7 @@ MDV FSP 默认允许本地资源根为当前 `.mdv` 所在目录。普通链接�
 
 ## 7. Agent 协作边界
 
-Agent 工具方案在 [`agent_tool.md`](./agent_tool.md) 中单独维护。2026-09-09 已在独立 adapter 实现成对读取和默认仅 Doc 保存；插件不读取 Agent 的内存，也不把自己的未保存 buffer 伪装成磁盘内容，Agent 只能看到已通过 Core 保存的状态。
+Agent 工具方案在 [`agent_tool.md`](./agent_tool.md) 中单独维护。2026-09-10 的协议 v2 已开放查询、两棵树版本生命周期与受管资源；Reference 写入由 Agent 宿主显示确认并由 CLI flag fail closed。插件不读取 Agent 的内存，也不把自己的未保存 buffer 伪装成磁盘内容，Agent 只能看到已通过 Core 保存的状态。
 
 首版通过“保存文件 + 外部变化检测 + CAS”协作，无 IPC、HTTP 服务或跨进程共享会话。VS Code 可以展示 CLI 保存后的内容，但安装插件不会自动给每个第三方 Agent 装配工具，也不保证其默认文本编辑器支持 `mdv:` URI。
 
@@ -236,7 +236,7 @@ Agent 工具方案在 [`agent_tool.md`](./agent_tool.md) 中单独维护。2026-
 
 P0–P3 的代码与本地 VSIX 已交付，当前定位是可安装的桌面本地预览版；下面的验收证据只覆盖实际运行的环境，不把跨平台、第三方渲染器和真实 Agent 工具联调用计划替代。
 
-后续真实 Agent 联合验收场景：用户创建 `.mdv` 并提交 Ref → Agent 读取该 Ref 和 Doc → Agent 保存新 Doc（不自动 commit）→ 插件展示新内容，用户插入图片并普通保存 → 用户 commit Doc 并绑定刚才的 Ref → Ref 和 Doc 图片后续继续演化 → 查看旧 Doc 时仍显示原绑定 Ref → 恢复旧 Doc 后，原 hash 图片引用仍正确。当前外部 writer 测试直接调用 Core，尚不是已完成 Agent CLI 的联合验收。
+完整真实 Agent 联合验收场景仍是：用户创建 `.mdv` 并提交 Ref → Agent 读取该 Ref 和 Doc → Agent 保存新 Doc（不自动 commit）→ 插件展示新内容，用户插入图片并普通保存 → 用户 commit Doc 并绑定刚才的 Ref → Ref 和 Doc 图片后续继续演化 → 查看旧 Doc 时仍显示原绑定 Ref → 恢复旧 Doc 后，原 hash 图片引用仍正确。2026-09-09 已完成真实 CLI 的成对读取、Doc 保存和 clean/dirty 协作子场景；preview.2 协议与完整命令面需要重新跑安装版联合检查，不能用旧 v1 结果代替。
 
 必须覆盖的回归：
 
@@ -257,7 +257,7 @@ P0–P3 的代码与本地 VSIX 已交付，当前定位是可安装的桌面本
 - 原生渲染：在真实预览 DOM 检查 hash 图片已完成加载且有自然宽度、表格已渲染、另一个测试扩展的 markdown-it 属性与 preview CSS 生效；保留截图。Markdown All in One 3.6.3 的编辑命令和保存通过定向检查，不代表其所有功能或其他扩展已验证。
 - 安装生命周期：在独立临时目录安装实际 VSIX，不通过源码链接激活；从空文件开始编辑，真实 reload 后未保存正文恢复，无外部变化时可完成首次保存，外部 writer 获胜时不能被旧基线覆盖。恢复时同时处理激活前已存在的 `TextDocument`，并恢复持久化基线，不能将当前磁盘 generation 当成恢复草稿的新基线。Restricted Mode 允许包括空文件在内的读取、拒绝写入入口。
 - 可重复入口：[`scripts/test-extension.mjs`](../../adapter/mdv_vscode/scripts/test-extension.mjs) 支持 `--installed`、`--restricted`、`--recovery`、`--empty-recovery` 与可选 `--markdown-extension`；安装检查会重新打包。workspace/user-data/extensions/shared-data 全部使用隔离临时目录，结果与截图保留在打印的位置，不向日常 VS Code 安装插件。
-- 仍待验证：Windows/Linux GUI、最低 VS Code 运行时、多窗口竞争、所有关闭/hot-exit 情形、LF/CRLF 与混合换行宿主行为、真实剪贴板/拖入来源矩阵、第三方独立 renderer 与 Agent CLI 联合流程。
+- 仍待验证：Windows/Linux GUI、最低 VS Code 运行时、多窗口竞争、所有关闭/hot-exit 情形、LF/CRLF 与混合换行宿主行为、真实剪贴板/拖入来源矩阵、第三方独立 renderer，以及 Agent CLI v2 完整生命周期联合流程。
 
 ### 8.2 preview.3 交互验收（2026-09-08）
 
@@ -292,6 +292,12 @@ P0–P3 的代码与本地 VSIX 已交付，当前定位是可安装的桌面本
 `preview.6` 只持久化整包 generation：Agent 保存 Doc 后，即使 Ref 的磁盘正文完全未变，dirty Ref 也会被标成 stale。`preview.7` 在 VS Code 会话层为 Ref/Doc 分别持久化 `contentBytes + contentSha256`，外部 generation 变化时只锁住正文实际变化的那一侧；Core 的整包 generation CAS、跨进程锁和原子替换保持不变。
 
 新增安装版用例双向验证“外部保存 Doc + dirty Ref”和“外部保存 Ref + dirty Doc”均可继续保存，同时既有同侧前台/隐藏 dirty 冲突用例仍通过。真实窗口 `--recovery` 验证外部变化的 Doc 被拒绝、未变化的恢复 Ref 可保存，`--empty-recovery` 与 Restricted Mode 也通过。完整安装套件中的本次冲突用例均通过；套件其余仍有 3 项 CDP 连接返回 403、2 项原生 undo 行为失败，因此不把该次运行记作全套通过。
+
+### 8.6 Agent CLI v2 联调适配（2026-09-10）
+
+可选真实 CLI 用例已从 v1 的 `expectedDocumentId + expectedGeneration` 请求改为复制 `read --json` 返回的 Document `baseline`，与 `@mdv/agent-tool 0.1.0-preview.2` 协议一致。测试仍验证 clean editor 自动刷新、人的 dirty buffer 保留且陈旧保存被插件拒绝、Ref/HEAD/历史不变。
+
+使用已经升级的个人 preview.2 runtime 和重新打包/隔离安装的 `mdv-vscode preview.7` 实跑，macOS arm64 / VS Code 1.136.1 / Extension Host Node 24.18.1 的完整套件 **22/22 通过**，真实 Agent CLI v2 子进程用例明确通过，renderer 日志没有 disposed Webview。证据保存在 `/var/folders/dj/qwyjs5wd0y7ftm7z5fn_27tr0000gn/T/mdv-vscode-test-hCs5z8/workspace/test-results.json`。本次原生 undo 也通过，但此前重复失败的 [O006](./open-questions.md#o006原生撤销回归在-agent-联合检查中失败) 仍作为间歇观察保留，不能由一次成功推断根因已经修复。
 
 ## 9. 本地分发与后续范围
 

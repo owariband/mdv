@@ -1,7 +1,7 @@
 {
   "name": "@mdv/agent-tool",
-  "version": "0.1.0-preview.1",
-  "description": "Read paired MDV reference/document content and save document drafts with conflict protection",
+  "version": "0.1.0-preview.2",
+  "description": "Read, version, diagnose, and safely edit MDV documents from coding agents",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",

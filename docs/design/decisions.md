@@ -117,12 +117,12 @@
 ## D013：adapter 同仓独立包与本地接入优先
 
 - 日期：2026-09-08
-- 状态：Accepted；VS Code 本地预览版已实现，Agent tool 仍为待实现方案。
+- 状态：Accepted；两份 adapter 均已实现本地预览版，Agent Tool 的后续权限与并发语义见 [D019](#d019agent-tool-完整命令面用户批准与按树冲突隔离)。
 - 方案：在仓库根规划 `adapter/mdv_vscode/` 和 `adapter/mdv_agent_tool/`，两个独立 package 分别承载 VS Code 与一次性 Agent CLI；根 package 继续是 `@mdv/core`。
 - 依赖：两个 adapter 都只消费 Core public API，互不依赖；同仓只是联调和版本管理方式，不允许 Core 反向引用 adapter，也不把它们的依赖、bin 或构建产物混入 Core 发布包。
 - 范围：先各包独立安装/构建/测试，不迁移 Core 目录、不先引入 workspace 或共享 adapter 框架；实装时以真实 Core tarball 和 VSIX/CLI 独立安装验证边界。
 - 排期：基于已验证的 Core 构建开始本地客户端和 Agent 工具接入，不等待 npm / Marketplace 正式发布；取代 D006 中先完成正式发布的排期假设，不改变 D012 的发布验收标准或 O003 的 owner 决策。
-- 交付目标：原生 Markdown 编辑与图片、Doc/Ref 精确 bind 对照、显式版本操作、外部保存后可见、未保存 buffer 不被外部改动覆盖。插件已完成本机独立安装验证；真实 Agent CLI 联合使用不在本轮完成口径中。
+- 交付目标：原生 Markdown 编辑与图片、Doc/Ref 精确 bind 对照、显式版本操作、外部保存后可见、未保存 buffer 不被外部改动覆盖。插件已完成本机独立安装验证；真实 Agent CLI 联合使用后来作为独立交付完成，不改写本决策当时的验收口径。
 - 依据：用户 2026-09-08 关于急需实际使用、维护两份方案以及 `adapter/` 目录的本轮要求；[插件方案](./vscode_plugin.md)、[Agent Tool 方案](./agent_tool.md)与[当前 Core 接口](../../src/types.ts)。
 
 ## D014：VS Code 复用原生 Markdown 编辑与渲染
@@ -169,7 +169,7 @@
 ## D017：Agent 默认成对读取、仅正文可写
 
 - 日期：2026-09-09
-- 状态：Accepted / Implemented（A0/A1 开发预览）。
+- 状态：Superseded by [D019](#d019agent-tool-完整命令面用户批准与按树冲突隔离)（A0/A1 历史开发预览）。
 - 来源：用户确认保留容器格式，要求先推送现有插件成果，再开发“同时返回 Ref 和正文、默认只允许修改正文”的 Agent 工具。
 - 决定：独立 `adapter/mdv_agent_tool/` 默认只开放成对 `read` 与 `save-document`。读取当前已保存工作副本，或根据历史 Doc 的精确 bind 读取历史配对；未绑定明确表达，不把新 Ref 混入旧 Doc。
 - 权限：Ref 与历史只读；不开放 Ref 写、commit/checkout、资源导入或提权开关。额外字段与历史写目标明确拒绝。权限由实际动作入口实施，不以 Skill 提示词代替校验。
@@ -186,3 +186,16 @@
 - 理由：发布身份必须落在 owner 控制的 namespace 下；在首次公开版本前完成改名不会产生已发布调用方迁移。Apache-2.0 为源码与二进制分发提供统一、明确的授权文本。
 - 影响：同步 package/lock、调用方 import、Adapter 固定 tarball、构建校验和当前用户文档；Format 0.1、public API 形状、运行时行为、错误码和版本历史均不改变。D006/D013 与开发日志中的 `@mdv/core` 保留为当时开发名的历史事实，由本决策取代其发布名称。
 - 未决：确认 `@owariband` npm scope 的发布权限、VS Code Marketplace publisher，以及首次使用 `0.1.0-rc.1` 还是直接 `0.1.0`。
+
+## D019：Agent Tool 完整命令面、用户批准与按树冲突隔离
+
+- 日期：2026-09-10
+- 状态：Accepted / Implemented（`@mdv/agent-tool 0.1.0-preview.2` 本地预览）。
+- 来源：用户确认 A0/A1 的“只读 Ref、只 save Doc”已不符合当前产品定位，授权补齐除 VS Code 专属 UI 外的 Core 能力，同时要求 Ref 写入显示询问、Doc/Ref 采用与插件一致的冲突隔离。
+- 命令面：提供 `create`、当前/历史 `read`、`status`、`versions`、`trace`、`diff`、`verify`、两棵树各自的 save/commit/checkout，以及受管资源 import/resolve/verify。CLI 不复制标签、编辑器布局、Markdown Preview 或版本图等宿主 UI。
+- 版本语义：commit 是独立显式动作，不跟随 save 自动发生。所有 Agent commit 的 `actor.type` 必须是 `agent`；Document commit 必须显式传入精确 Reference Version 或 `null`，不得默认绑定当前或最新 Ref，也不得把 Git commit 冒充 MDV Version。
+- 批准：所有 Reference 写命令在进入 Core 前必须同时具备一次对话中可见的用户确认和 `--user-approved-reference-write`；所有 `discardChanges: true` checkout 还要求独立的 `--user-approved-discard`。缺少批准以 exit 4 fail closed。CLI 参数是防误用和审计语义，不是密码学用户证明；恶意 Agent 的硬隔离属于宿主权限/一次性凭证范围。
+- 并发：Ref/Doc 共处同一 ZIP，继续共用 Core 的整包跨进程锁、generation CAS 和原子替换，不能拆成两把物理锁。协议 v2 的每棵树 baseline 携带 `documentId + generation + tree + head + contentBytes + contentSha256`；generation 变化后只比较本动作依赖的树，commit/checkout 额外核对目标 HEAD。
+- 重试：只有目标树依赖仍未变化时，才可用刚观察到的 generation 再进入 Core；每次整包 CAS 或锁竞争都重新打开并核对 baseline。目标内容/HEAD 或 documentId 改变立即冲突；`details.committed: true` 绝不重放，先重新观察磁盘。
+- 边界：上述逻辑位于独立 adapter，不改变 Core public API、Format 0.1 或 VS Code 会话实现。Core 仍是唯一归档事务实现，Skill 负责在对话中执行批准流程，CLI 负责动作入口的 fail-closed 校验。
+- 证据：[实现与使用](../../adapter/mdv_agent_tool/README.md)、[协议与并发方案](./agent_tool.md)、[真实子进程回归](../../adapter/mdv_agent_tool/test/cli.test.mjs)。本机 22 项覆盖跨树双成功、同树两侧各自单赢家、身份替换、HEAD 冲突、批准闸门、精确 bind、资源与预算；仓库外 tarball 安装后同一套 22 项再次通过，跨平台仍需独立证据。

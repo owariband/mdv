@@ -702,7 +702,7 @@ export async function run(): Promise<void> {
     assert.equal(bytes.subarray(0, 2).toString(), 'PK')
   })
 
-  if (process.env.MDV_TEST_AGENT_CLI) await check('real Agent CLI reads the pair, saves only Doc, refreshes clean editors and protects dirty ones', async () => {
+  if (process.env.MDV_TEST_AGENT_CLI) await check('real Agent CLI v2 reads the pair, saves Doc, refreshes clean editors and protects dirty ones', async () => {
     const target = vscode.Uri.file(join(workspace, 'agent tool.mdv'))
     let initial = await createMdv(target.fsPath)
     initial = await initial.saveReference({ markdown: '# Human Ref\n', expectedGeneration: 0 })
@@ -724,15 +724,15 @@ export async function run(): Promise<void> {
     const pair = await runCli('read', '--file', target.fsPath, '--json')
     assert.equal(pair.reference.text, '# Human Ref\n')
     assert.equal(pair.document.text, '')
-    await writeFile(input, JSON.stringify({ expectedDocumentId: pair.documentId,
-      expectedGeneration: pair.generation, markdown: '# Agent first save\n' }))
+    await writeFile(input, JSON.stringify({ baseline: pair.document.baseline,
+      markdown: '# Agent first save\n' }))
     await runCli('save-document', '--file', target.fsPath, '--input', input)
     await until(() => editor.getText() === '# Agent first save\n', 'real CLI save refreshes clean editor')
     await replace(editor, '# Human unsaved edits\n')
     const nextPair = await runCli('read', '--file', target.fsPath, '--json')
     assert.equal(nextPair.document.text, '# Agent first save\n', 'Agent sees disk, not the unsaved editor buffer')
-    await writeFile(input, JSON.stringify({ expectedDocumentId: nextPair.documentId,
-      expectedGeneration: nextPair.generation, markdown: '# Agent second save\n' }))
+    await writeFile(input, JSON.stringify({ baseline: nextPair.document.baseline,
+      markdown: '# Agent second save\n' }))
     await runCli('save-document', '--file', target.fsPath, '--input', input)
     await delay(300)
     assert.equal(editor.isDirty, true)

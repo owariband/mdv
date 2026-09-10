@@ -3,22 +3,65 @@ import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { parseArgs, TextDecoder } from 'node:util'
-import { readPair, saveDocument } from './commands.js'
-import { failure, jsonOutput, MAX_INPUT_BYTES, parseSaveRequest, parseVersion, textOutput, ToolError } from './protocol.js'
+import {
+  checkout,
+  commit,
+  create,
+  diff,
+  importResource,
+  readPair,
+  resolveResource,
+  save,
+  status,
+  trace,
+  verify,
+  verifyResource,
+  versions,
+} from './commands.js'
+import {
+  failure,
+  jsonOutput,
+  MAX_INPUT_BYTES,
+  parseCheckoutRequest,
+  parseCommitRequest,
+  parseDiffRequest,
+  parseImportResourceRequest,
+  parseResourceRequest,
+  parseSaveRequest,
+  parseTree,
+  parseVerifyResourceRequest,
+  parseVersion,
+  textOutput,
+  ToolError,
+} from './protocol.js'
 
 declare const MDV_AGENT_TOOL_VERSION: string
 
+const COMMANDS = [
+  'create', 'read', 'status', 'versions', 'trace', 'diff', 'verify',
+  'save-document', 'commit-document', 'checkout-document',
+  'save-reference', 'commit-reference', 'checkout-reference',
+  'import-resource', 'resolve-resource', 'verify-resource',
+] as const
+
 const HELP = 'MDV Agent Tool ' + MDV_AGENT_TOOL_VERSION + '\n\n'
-  + 'mdv read --file <path.mdv> [--json] [--document-version <version-id>]\n'
-  + 'mdv save-document --file <path.mdv> --input <request.json|->\n\n'
-  + 'Read returns reference document + actual document from one saved snapshot.\n'
-  + 'Historical reads return the exact bound Ref (or unbound), never today\'s Ref.\n'
-  + 'Only the current Document is writable. Ref and committed history are read-only.\n'
-  + 'Save input: {expectedDocumentId, expectedGeneration, markdown}. Use the baseline from read.\n'
-  + 'Save never commits, changes Ref, or retries conflicts. --json reads preserve exact strings.\n'
-  + 'Read defaults to text; save and errors return JSON. Limits: input 16 MiB, output 32 MiB.\n'
-  + 'Exit codes: 0 success, 2 invalid input/budget, 3 Core or input I/O error, 4 permission, 1 internal/output error.\n'
-  + 'This tool does not grant filesystem access or sandbox other Agent commands.\n'
+  + 'Read and diagnose:\n'
+  + '  mdv read --file <path.mdv> [--json] [--document-version <version-id>]\n'
+  + '  mdv status|versions|verify --file <path.mdv> [command options]\n'
+  + '  mdv trace --file <path.mdv> --tree <reference|document> --version-id <id>\n'
+  + '  mdv diff --file <path.mdv> --input <request.json|->\n\n'
+  + 'Write Document:\n'
+  + '  mdv save-document|commit-document|checkout-document --file <path.mdv> --input <request.json|->\n\n'
+  + 'Write Reference (visible user approval is required before adding the flag):\n'
+  + '  mdv save-reference|commit-reference|checkout-reference --file <path.mdv> --input <request.json|-> --user-approved-reference-write\n\n'
+  + 'Create and managed images:\n'
+  + '  mdv create --file <path.mdv> [--markdown-profile <profile>]\n'
+  + '  mdv import-resource|resolve-resource|verify-resource --file <path.mdv> --input <request.json|->\n\n'
+  + 'Current writes require a tree baseline copied from read/status. The package lock remains document-wide;\n'
+  + 'stale generations are rebased only while the target tree content (and, for history operations, HEAD) is unchanged.\n'
+  + 'Document commits require an explicit Reference Version or null and actor.type=agent. Nothing auto-commits.\n'
+  + 'Discarding dirty working-copy content additionally requires --user-approved-discard.\n'
+  + 'Limits: JSON input 16 MiB, JSON output 32 MiB, managed image 32 MiB. Use --help alone.\n'
 
 async function readInput(path: string): Promise<string> {
   const chunks: Buffer[] = []
@@ -51,9 +94,13 @@ async function run(): Promise<string> {
   try {
     args = parseArgs({ allowPositionals: true, strict: true, tokens: true, options: {
       file: { type: 'string' }, input: { type: 'string' }, json: { type: 'boolean' },
-      'document-version': { type: 'string' }, help: { type: 'boolean' }, version: { type: 'boolean' },
+      'document-version': { type: 'string' }, tree: { type: 'string' }, 'version-id': { type: 'string' },
+      mode: { type: 'string' }, 'markdown-profile': { type: 'string' },
+      'user-approved-reference-write': { type: 'boolean' }, 'user-approved-discard': { type: 'boolean' },
+      help: { type: 'boolean' }, version: { type: 'boolean' },
     } })
   } catch { throw new ToolError('INVALID_ARGUMENT', 'Invalid arguments; use --help') }
+
   const options = args.tokens.filter((token) => token.kind === 'option')
   if (new Set(options.map((token) => token.name)).size !== options.length) {
     throw new ToolError('INVALID_ARGUMENT', 'Duplicate command-line options are not allowed')
@@ -64,26 +111,122 @@ async function run(): Promise<string> {
     return values.help ? HELP : MDV_AGENT_TOOL_VERSION + '\n'
   }
   const command = positionals[0]
-  if (command && ['save-reference', 'commit-reference', 'commit-document', 'checkout-reference', 'checkout-document', 'import-resource', 'create'].includes(command)) {
-    throw new ToolError('PERMISSION_DENIED', 'Default tools permit paired reads and save-document only; Ref and history mutations are not exposed')
+  if (positionals.length !== 1 || !COMMANDS.includes(command as typeof COMMANDS[number])) {
+    throw new ToolError('INVALID_ARGUMENT', 'Choose one MDV command; use --help')
   }
-  if (positionals.length !== 1 || !['read', 'save-document'].includes(command ?? '')) {
-    throw new ToolError('INVALID_ARGUMENT', 'Choose read or save-document; use --help')
-  }
-  if (!values.file || extname(values.file).toLowerCase() !== '.mdv' || /^(?:[a-z][a-z0-9+.-]*:\/\/|mdv:)/i.test(values.file)) {
+  if (!values.file || extname(values.file).toLowerCase() !== '.mdv'
+    || /^(?:[a-z][a-z0-9+.-]*:\/\/|mdv:)/i.test(values.file)) {
     throw new ToolError('INVALID_ARGUMENT', '--file must name a local .mdv file, not a virtual URI')
   }
   const file = resolve(values.file)
-  if (command === 'read') {
-    if (values.input !== undefined) throw new ToolError('INVALID_ARGUMENT', 'read does not accept --input')
-    const version = values['document-version'] === undefined ? undefined : parseVersion(values['document-version'])
-    const pair = await readPair(file, version)
-    return values.json ? jsonOutput(pair) : textOutput(pair)
+
+  switch (command) {
+    case 'create': {
+      allowOnly(options, ['file', 'markdown-profile'])
+      const profile = values['markdown-profile']
+      if (profile !== undefined && !/^[a-z][a-z0-9._-]{0,63}$/.test(profile)) {
+        throw new ToolError('INVALID_ARGUMENT', '--markdown-profile must be a lowercase profile token up to 64 characters')
+      }
+      return jsonOutput(await create(file, profile))
+    }
+    case 'read': {
+      allowOnly(options, ['file', 'json', 'document-version'])
+      const version = values['document-version'] === undefined ? undefined : parseVersion(values['document-version'])
+      const pair = await readPair(file, version)
+      return values.json ? jsonOutput(pair) : textOutput(pair)
+    }
+    case 'status':
+      allowOnly(options, ['file'])
+      return jsonOutput(await status(file))
+    case 'versions':
+      allowOnly(options, ['file', 'tree'])
+      return jsonOutput(await versions(file, parseTree(values.tree)))
+    case 'trace': {
+      allowOnly(options, ['file', 'tree', 'version-id'])
+      const tree = parseTree(values.tree)
+      if (tree === undefined || values['version-id'] === undefined) {
+        throw new ToolError('INVALID_ARGUMENT', 'trace requires --tree and --version-id')
+      }
+      return jsonOutput(await trace(file, tree, parseVersion(values['version-id'])))
+    }
+    case 'diff':
+      allowOnly(options, ['file', 'input'])
+      return jsonOutput(await diff(file, parseDiffRequest(await requiredInput(values.input, command))))
+    case 'verify': {
+      allowOnly(options, ['file', 'mode'])
+      const mode = values.mode ?? 'full'
+      if (mode !== 'metadata' && mode !== 'full') throw new ToolError('INVALID_ARGUMENT', '--mode must equal metadata or full')
+      return jsonOutput(await verify(file, mode))
+    }
+    case 'save-document':
+    case 'save-reference': {
+      const tree = command === 'save-reference' ? 'reference' : 'document'
+      allowOnly(options, tree === 'reference'
+        ? ['file', 'input', 'user-approved-reference-write'] : ['file', 'input'])
+      if (tree === 'reference' && !values['user-approved-reference-write']) requireReferenceApproval(command, file)
+      return jsonOutput(await save(file, tree, parseSaveRequest(await requiredInput(values.input, command), tree)))
+    }
+    case 'commit-document':
+    case 'commit-reference': {
+      const tree = command === 'commit-reference' ? 'reference' : 'document'
+      allowOnly(options, tree === 'reference'
+        ? ['file', 'input', 'user-approved-reference-write'] : ['file', 'input'])
+      if (tree === 'reference' && !values['user-approved-reference-write']) requireReferenceApproval(command, file)
+      return jsonOutput(await commit(file, tree, parseCommitRequest(await requiredInput(values.input, command), tree)))
+    }
+    case 'checkout-document':
+    case 'checkout-reference': {
+      const tree = command === 'checkout-reference' ? 'reference' : 'document'
+      allowOnly(options, tree === 'reference'
+        ? ['file', 'input', 'user-approved-reference-write', 'user-approved-discard']
+        : ['file', 'input', 'user-approved-discard'])
+      if (tree === 'reference' && !values['user-approved-reference-write']) requireReferenceApproval(command, file)
+      const request = parseCheckoutRequest(await requiredInput(values.input, command), tree)
+      if (request.discardChanges && !values['user-approved-discard']) requireDiscardApproval(command, file, tree)
+      if (!request.discardChanges && values['user-approved-discard']) {
+        throw new ToolError('INVALID_ARGUMENT', '--user-approved-discard is only valid when discardChanges is true')
+      }
+      return jsonOutput(await checkout(file, tree, request))
+    }
+    case 'import-resource':
+      allowOnly(options, ['file', 'input'])
+      return jsonOutput(await importResource(file,
+        parseImportResourceRequest(await requiredInput(values.input, command))))
+    case 'resolve-resource':
+      allowOnly(options, ['file', 'input'])
+      return jsonOutput(await resolveResource(file,
+        parseResourceRequest(await requiredInput(values.input, command))))
+    case 'verify-resource':
+      allowOnly(options, ['file', 'input'])
+      return jsonOutput(await verifyResource(file,
+        parseVerifyResourceRequest(await requiredInput(values.input, command))))
+    default:
+      throw new ToolError('INVALID_ARGUMENT', 'Unsupported command; use --help')
   }
-  if (values['document-version'] !== undefined) throw new ToolError('PERMISSION_DENIED', 'History is read-only; save-document targets the current working copy')
-  if (!values.input) throw new ToolError('INVALID_ARGUMENT', 'save-document requires --input <request.json|->')
-  const input = parseSaveRequest(await readInput(values.input))
-  return jsonOutput(await saveDocument(file, input))
+}
+
+function allowOnly(options: readonly { readonly name: string }[], allowed: readonly string[]): void {
+  const unexpected = options.find((option) => !allowed.includes(option.name))
+  if (unexpected) throw new ToolError('INVALID_ARGUMENT', `--${unexpected.name} is not valid for this command`)
+}
+
+async function requiredInput(path: string | undefined, command: string): Promise<string> {
+  if (!path) throw new ToolError('INVALID_ARGUMENT', `${command} requires --input <request.json|->`)
+  return readInput(path)
+}
+
+function requireReferenceApproval(action: string, file: string): never {
+  throw new ToolError('USER_APPROVAL_REQUIRED',
+    `Ask the user visibly before ${action}; rerun with --user-approved-reference-write only after approval`, {
+      requiredApproval: { scope: 'reference-write', action, file },
+    })
+}
+
+function requireDiscardApproval(action: string, file: string, tree: string): never {
+  throw new ToolError('USER_APPROVAL_REQUIRED',
+    `Ask the user visibly before discarding saved ${tree} working-copy changes`, {
+      requiredApproval: { scope: 'discard-working-copy', action, file, tree },
+    })
 }
 
 function writeOutput(text: string): Promise<void> {
