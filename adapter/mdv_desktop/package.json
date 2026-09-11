@@ -1,0 +1,40 @@
+{
+  "name": "@mdv/desktop",
+  "version": "0.1.0-preview.0",
+  "description": "A focused Milkdown desktop editor for MDV documents",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "out/main/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "prepare:core": "node scripts/prepare-core.mjs",
+    "check:core": "node scripts/check-core.mjs",
+    "dev": "npm run check:core && electron-vite dev",
+    "start": "npm run check:core && electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "build": "npm run check:core && npm run typecheck && electron-vite build",
+    "test": "npm run build && node --test test/mdv-session.test.mjs test/folder-workspace.test.mjs test/markdown-session.test.mjs",
+    "test:e2e": "npm run build && node test/desktop.e2e.mjs"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.22.1",
+    "@milkdown/kit": "7.22.1",
+    "@owariband/mdv": "file:vendor/owariband-mdv-0.0.0-development.tgz",
+    "vue": "3.5.42"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "@vitejs/plugin-vue": "6.0.8",
+    "electron": "44.3.0",
+    "electron-vite": "5.0.0",
+    "playwright-core": "1.63.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vue-tsc": "3.3.11"
+  }
+}

@@ -33,7 +33,7 @@ AI 越来越好用，我们也越来越愿意让它参与写作和改稿。但�
 
 **MDV 就是在这个背景下推出的。** 它把给 AI 的提示词、brief 和背景材料保存为 **Reference**，把人的原始文档以及后续的人机协作稿保存为 **Document**。两者位于同一个 `.mdv` 文件中，却可以独立编辑、独立形成不可变版本；下一次 Agent 可以从同一个文件读回上下文，每个 Document Version 也会精确绑定它实际使用的 Reference Version。
 
-> **MDV 已公开发布。** Format 0.1、Core、VS Code Plugin 与 Agent Tool 均已在本仓库开放，可以直接获取、构建和使用；当前公开发布渠道为 GitHub 源码。
+> **MDV 已通过 GitHub 源码公开。** Format 0.1、Core、VS Code Plugin 与 Agent Tool 均已在本仓库开放；MDV Desktop 也以可从源码运行的 Preview 形式提供，但尚无安装包、签名或自动更新。当前公开分发渠道仍为 GitHub 源码。
 
 ## MDV 解决什么问题
 
@@ -43,27 +43,28 @@ AI 越来越好用，我们也越来越愿意让它参与写作和改稿。但�
 | AI 改完只剩最新版，人的原稿和中间版本容易被覆盖 | Document 拥有独立历史；每次显式 commit 都形成不可变版本，原稿与历次修改都能找回 |
 | 文档与提示词都在变化，事后说不清某份结果用了哪版要求 | 每个 Document Version 精确 bind 到当时使用的 Reference Version，可以追溯、比较和验证 |
 
-MDV（Markdown Document with Versions）不是再造一个编辑器，而是给现有 Markdown 工作流补上一层可携带的记忆：不必反复重写上下文，也不必拿人的原始文档去交换 AI 的便利。
+MDV（Markdown Document with Versions）给 Markdown 工作流补上一层可携带的记忆：不必反复重写上下文，也不必拿人的原始文档去交换 AI 的便利。它不要求你更换编辑器——可以继续使用 VS Code，也可以选择仓库中的专注型 Desktop Preview。
 
 ## 我们提供什么
 
-MDV 不只是一种文件扩展名。这个仓库提供一套完整的 MDV 文档范式，以及分别面向开发者、人和 Agent 的三个可用组件：
+MDV 不只是一种文件扩展名。这个仓库提供一套完整的 MDV 文档范式，以及分别面向开发者、人和 Agent 的四个组件；其中 Desktop 当前是源码 Preview：
 
-**一句话概括：Core 负责解析 `.mdv`，VS Code Plugin 让人阅读 `.mdv`，Agent Tool 让 Agent 操作 `.mdv`。**
+**一句话概括：Core 负责 `.mdv` 的格式语义，VS Code Plugin 与 MDV Desktop 面向人，Agent Tool 面向 Agent。**
 
 | 组件 | 面向谁 | 提供什么 |
 | --- | --- | --- |
 | [MDV Core](docs/README.md) — 文档范式解析库 | 开发者与工具作者 | `.mdv` 格式的 TypeScript 参考实现：解析、创建、校验和读写 MDV，并管理 Reference / Document 两棵版本树、精确 bind、Diff、Trace 与受管资源 |
 | [MDV for VS Code](adapter/mdv_vscode/README.md) — VS Code Plugin | 人 | 在 VS Code 中直接阅读 `.mdv`：复用原生 Markdown 编辑器和预览器，查看 Reference / Document、双列版本图与精确绑定；也可以编辑、保存、commit 和恢复历史版本 |
+| [MDV Desktop](adapter/mdv_desktop/README.md) — Desktop Preview | 人 | 基于 Electron、Vue 3 与 Milkdown 的专注型桌面编辑器：同屏编辑 Ref / Doc，查看已有版本、分支与精确 bind；普通 `.md` 保持单栏。Reference 每次保存都需原生确认；当前仅支持源码构建，尚不支持 commit / checkout |
 | [MDV Agent Tool](adapter/mdv_agent_tool/README.md) — Agent Tool | AI Agent | 让 Agent 通过权限感知的 CLI 安全操作 `.mdv`：读取成对上下文，查询状态、版本、Trace、Diff 和诊断，并在明确边界内保存、commit 或 checkout |
 
 ```text
-Human  ⇄  MDV for VS Code ─┐
-                            ├─⇄ MDV Core ⇄ .mdv
-Agent  ⇄  MDV Agent Tool ──┘
+Human  ⇄  MDV for VS Code ────┐
+Human  ⇄  MDV Desktop Preview ├─⇄ MDV Core ⇄ .mdv
+Agent  ⇄  MDV Agent Tool ─────┘
 ```
 
-VS Code Plugin 和 Agent Tool 都建立在同一套 Core 与 Format 0.1 上：人看到的、Agent 读取的和磁盘中保存的是同一种 MDV 语义，不需要在三套模型之间转换。
+三个 adapter 都建立在同一套 Core 与 Format 0.1 上：人看到的、Agent 读取的和磁盘中保存的是同一种 MDV 语义，不需要在多套模型之间转换。
 
 ## 先看 MDV 在做什么
 
@@ -128,7 +129,19 @@ npm install /absolute/path/to/mdv
 
 运行时要求 Node.js 20+ 与 ESM `import`。当前公开发行版以本 GitHub 仓库中的源码、格式规范和验证结果为准。
 
-### 2. 保存两份工作副本，并提交一次精确绑定
+### 2. 运行 Desktop Preview（可选）
+
+```bash
+cd adapter/mdv_desktop
+npm run prepare:core
+npm ci
+npm run build
+npm run start
+```
+
+Desktop 要求 Node.js 22.12+。它可以打开文件或目录、同屏编辑并安全保存 Ref / Doc 工作副本，以及查看已有版本、分支与 bind；版本图当前只读，尚不能在 Desktop 内 commit 或 checkout。普通 `.md` 使用单栏编辑，当前也还没有 installer、签名或自动更新。`prepare:core` 会把当前本地 Core 打成固定 tarball，Desktop 仍是独立 npm package。
+
+### 3. 保存两份工作副本，并提交一次精确绑定
 
 ```ts
 import { createMdv } from '@owariband/mdv'
@@ -174,6 +187,7 @@ console.log(document.document.traceDocument(document.version).reference?.id)
 - [图片与相对资源](docs/resources.md) — 普通路径与 hash sidecar。
 - [兼容性与平台边界](docs/compatibility.md) — 运行环境、文件系统语义与默认预算。
 - [Container Format 0.1](spec/format-0.1.md) — 兼容 Reader / Writer 的规范性基线。
+- [MDV Desktop Preview](adapter/mdv_desktop/README.md) — 桌面端能力边界、本地运行方式与架构。
 
 <details>
 <summary>维护者与发布资料</summary>
@@ -194,12 +208,21 @@ npm run test:package
 npm run bench -- --quick
 ```
 
-CI 在 Ubuntu、macOS 与 Windows 上覆盖 Node.js 22 / 24 / 26，并额外验证 Ubuntu / Node.js 20。`npm run test:package` 会从干净源码构建真实 tarball，再交给独立 runtime 与 TypeScript consumer 安装验证。
+Desktop 是独立 package，需要单独验证：
 
-MDV 已通过 GitHub 公开发布。后续每次进行版本化分发时，维护者仍会在目标提交上完成[发布检查](docs/releasing.md)，确认包内容、跨平台验证、许可证与第三方声明保持一致。
+```bash
+cd adapter/mdv_desktop
+npm run typecheck
+npm test
+npm run test:e2e
+```
+
+Core CI 在 Ubuntu、macOS 与 Windows 上覆盖 Node.js 22 / 24 / 26，并额外验证 Ubuntu / Node.js 20。`npm run test:package` 会从干净源码构建真实 tarball，再交给独立 runtime 与 TypeScript consumer 安装验证。根目录的 `npm test` 与当前 Core CI 尚不会自动运行 Desktop 的 Electron E2E。
+
+MDV 源码已通过 GitHub 公开。后续每次进行版本化分发时，维护者仍会在目标提交上完成[发布检查](docs/releasing.md)，确认包内容、跨平台验证、许可证与第三方声明保持一致。
 
 ## License
 
 MDV 使用 [Apache License 2.0](LICENSE)。在遵守许可证条款的前提下，可以使用、修改和分发本项目，包括商业使用；分发修改版本时需要保留适用的许可证与版权声明，并说明所作修改。Apache-2.0 还包含明确的贡献者专利授权。
 
-仓库根目录与两个 adapter 使用完全相同的 Apache-2.0 标准正文。打包进 adapter 单文件产物的第三方组件及其许可见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。本节只是便于阅读的说明，不替代许可证正文，也不构成法律意见；发生差异时以 `LICENSE` 与第三方许可原文为准。
+仓库根目录与各 adapter 使用完全相同的 Apache-2.0 标准正文。现有 adapter 单文件产物中第三方组件及其许可见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)；Desktop 尚无分发包，首次打包前仍需完成 Electron、Vue 与 Milkdown 等依赖的许可清单复核。本节只是便于阅读的说明，不替代许可证正文，也不构成法律意见；发生差异时以 `LICENSE` 与第三方许可原文为准。

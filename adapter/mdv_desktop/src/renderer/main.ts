@@ -1,0 +1,15 @@
+import { createApp } from 'vue'
+import App from './App.vue'
+import '@milkdown/crepe/theme/common/reset.css'
+import '@milkdown/crepe/theme/common/prosemirror.css'
+import '@milkdown/crepe/theme/common/block-edit.css'
+import '@milkdown/crepe/theme/common/link-tooltip.css'
+import '@milkdown/crepe/theme/common/list-item.css'
+import '@milkdown/crepe/theme/common/placeholder.css'
+import '@milkdown/crepe/theme/common/table.css'
+import '@milkdown/crepe/theme/common/toolbar.css'
+import '@milkdown/crepe/theme/classic-dark.css'
+import './styles/app.css'
+import './styles/hypnos-terminal.css'
+
+createApp(App).mount('#app')

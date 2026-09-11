@@ -1,0 +1,354 @@
+/*
+ * Hypnos Terminal — MDV desktop edition.
+ *
+ * Adapted from the Typora theme of the same name. The tokens stay literal so
+ * the desktop editor and the Typora reading surface remain recognizably the
+ * same theme; only the host-specific selectors are translated to Milkdown.
+ */
+
+:root {
+  color-scheme: dark;
+  --canvas: #1a1b1c;
+  --sidebar: #151617;
+  --surface: #202224;
+  --surface-raised: #26292c;
+  --surface-hover: #242628;
+  --ink: #cccccc;
+  --ink-strong: #f0f4f7;
+  --ink-soft: #8f969e;
+  --ink-faint: #858b92;
+  --line: #2b2c2d;
+  --line-strong: #3a3e42;
+  --reference: #12a8cd;
+  --document: #cba6f7;
+  --danger: #ff6b7a;
+  --warning: #fab488;
+  --terminal-green: #24d18b;
+  --terminal-blue: #3c8fea;
+  --terminal-font: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", "PingFang SC", "Microsoft YaHei", monospace;
+  color: var(--ink);
+  background: var(--canvas);
+  font-family: var(--terminal-font);
+}
+
+html {
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  line-height: 1.72;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--terminal-font);
+}
+
+::selection {
+  color: #ffffff;
+  background: #264f78;
+  text-shadow: none;
+}
+
+.milkdown-root .milkdown {
+  --crepe-base-font-size: 11px;
+  --crepe-color-background: var(--canvas);
+  --crepe-color-on-background: var(--ink);
+  --crepe-color-surface: var(--surface);
+  --crepe-color-surface-low: var(--sidebar);
+  --crepe-color-on-surface: var(--ink-strong);
+  --crepe-color-on-surface-variant: var(--ink-soft);
+  --crepe-color-outline: var(--line-strong);
+  --crepe-color-primary: var(--document);
+  --crepe-color-secondary: #413653;
+  --crepe-color-on-secondary: #f4eaff;
+  --crepe-color-inverse: #e5e7e8;
+  --crepe-color-on-inverse: #1d2021;
+  --crepe-color-inline-code: var(--reference);
+  --crepe-color-error: var(--danger);
+  --crepe-color-hover: var(--surface-hover);
+  --crepe-color-selected: #34303b;
+  --crepe-color-inline-area: #202326;
+  --crepe-font-default: var(--terminal-font);
+  --crepe-font-title: var(--terminal-font);
+  --crepe-font-code: var(--terminal-font);
+}
+
+.reference.editor-layer .milkdown-root .milkdown {
+  --crepe-color-primary: var(--reference);
+  --crepe-color-secondary: #25484d;
+  --crepe-color-on-secondary: #def7fa;
+  --crepe-color-selected: #263a3d;
+}
+
+.milkdown-root .milkdown .ProseMirror {
+  width: min(1080px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 34px 42px 120px;
+  color: var(--ink);
+  font-family: var(--terminal-font);
+  font-size: 11px;
+  line-height: 1.72;
+  letter-spacing: 0.005em;
+  -webkit-font-smoothing: antialiased;
+}
+
+.milkdown-root .milkdown .ProseMirror p,
+.milkdown-root .milkdown .ProseMirror ul,
+.milkdown-root .milkdown .ProseMirror ol,
+.milkdown-root .milkdown .ProseMirror dl,
+.milkdown-root .milkdown .ProseMirror table,
+.milkdown-root .milkdown .ProseMirror pre,
+.milkdown-root .milkdown .ProseMirror blockquote {
+  margin-top: 0.72em;
+  margin-bottom: 0.72em;
+}
+
+.milkdown-root .milkdown .ProseMirror p {
+  padding: 0;
+  line-height: inherit;
+}
+
+.milkdown-root .milkdown .ProseMirror h1,
+.milkdown-root .milkdown .ProseMirror h2,
+.milkdown-root .milkdown .ProseMirror h3,
+.milkdown-root .milkdown .ProseMirror h4,
+.milkdown-root .milkdown .ProseMirror h5,
+.milkdown-root .milkdown .ProseMirror h6 {
+  position: relative;
+  margin: 1.45em 0 0.62em;
+  padding: 0;
+  color: var(--ink-strong);
+  font-family: var(--terminal-font);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.45;
+}
+
+.milkdown-root .milkdown .ProseMirror h1 {
+  padding-bottom: 0.36em;
+  border-bottom: 1px solid var(--line);
+  font-size: 1.58rem;
+}
+
+.milkdown-root .milkdown .ProseMirror h2 {
+  padding-bottom: 0.24em;
+  border-bottom: 1px solid #252729;
+  font-size: 1.34rem;
+}
+
+.milkdown-root .milkdown .ProseMirror h3 {
+  font-size: 1.15rem;
+}
+
+.milkdown-root .milkdown .ProseMirror h4 {
+  font-size: 1.03rem;
+}
+
+.milkdown-root .milkdown .ProseMirror h5,
+.milkdown-root .milkdown .ProseMirror h6 {
+  color: #b8bec5;
+  font-size: 0.96rem;
+}
+
+/* Preserve Markdown structure as a quiet terminal prompt. */
+.milkdown-root .milkdown .ProseMirror h1::before,
+.milkdown-root .milkdown .ProseMirror h2::before,
+.milkdown-root .milkdown .ProseMirror h3::before,
+.milkdown-root .milkdown .ProseMirror h4::before,
+.milkdown-root .milkdown .ProseMirror h5::before,
+.milkdown-root .milkdown .ProseMirror h6::before {
+  color: var(--reference);
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.milkdown-root .milkdown .ProseMirror h1::before { content: "# "; }
+.milkdown-root .milkdown .ProseMirror h2::before { content: "## "; }
+.milkdown-root .milkdown .ProseMirror h3::before { content: "### "; }
+.milkdown-root .milkdown .ProseMirror h4::before { content: "#### "; }
+.milkdown-root .milkdown .ProseMirror h5::before { content: "##### "; }
+.milkdown-root .milkdown .ProseMirror h6::before { content: "###### "; }
+
+.milkdown-root .milkdown .ProseMirror .crepe-placeholder::before {
+  content: attr(data-placeholder);
+}
+
+.milkdown-root .milkdown .ProseMirror a {
+  color: var(--reference);
+  text-decoration: none;
+}
+
+.milkdown-root .milkdown .ProseMirror a:hover,
+.milkdown-root .milkdown .ProseMirror a:focus {
+  color: #42c7e7;
+  text-decoration: underline;
+  text-decoration-color: rgb(66 199 231 / 55%);
+  text-underline-offset: 0.2em;
+}
+
+.milkdown-root .milkdown .ProseMirror strong,
+.milkdown-root .milkdown .ProseMirror b,
+.milkdown-root .milkdown .ProseMirror th {
+  color: var(--ink-strong);
+  font-weight: 700;
+}
+
+.milkdown-root .milkdown .ProseMirror em,
+.milkdown-root .milkdown .ProseMirror i {
+  color: #d7dbe0;
+}
+
+.milkdown-root .milkdown .ProseMirror code {
+  padding: 0.1em 0.32em;
+  border: 1px solid #303337;
+  border-radius: 4px;
+  color: var(--reference);
+  background: #202326;
+  font-family: var(--terminal-font);
+  font-size: 0.92em;
+}
+
+.milkdown-root .milkdown .ProseMirror pre {
+  padding: 0.9em 1.05em;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #d7dce2;
+  background: #131516;
+  font-family: var(--terminal-font);
+  line-height: 1.62;
+}
+
+.milkdown-root .milkdown .ProseMirror pre code {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.milkdown-root .milkdown .ProseMirror blockquote {
+  box-sizing: border-box;
+  margin-left: 0;
+  padding: 0.58em 1em;
+  border-left: 3px solid var(--terminal-green);
+  color: #cfe8dd;
+  background: rgb(36 209 139 / 5.5%);
+}
+
+.milkdown-root .milkdown .ProseMirror blockquote::before {
+  display: none;
+}
+
+.milkdown-root .milkdown .ProseMirror ul > li::marker {
+  color: var(--reference);
+}
+
+.milkdown-root .milkdown .ProseMirror ol > li::marker {
+  color: var(--terminal-blue);
+  font-weight: 700;
+}
+
+.milkdown-root .milkdown .ProseMirror hr {
+  height: 1px;
+  margin: 1.5em 0;
+  padding: 0;
+  border: 0;
+  background: var(--line);
+}
+
+.milkdown-root .milkdown .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.milkdown-root .milkdown .ProseMirror thead,
+.milkdown-root .milkdown .ProseMirror table tr:nth-child(2n) {
+  background: #1e2022;
+}
+
+.milkdown-root .milkdown .ProseMirror table tr,
+.milkdown-root .milkdown .ProseMirror table th,
+.milkdown-root .milkdown .ProseMirror table td {
+  border: 1px solid var(--line);
+}
+
+.milkdown-root .milkdown .ProseMirror table th,
+.milkdown-root .milkdown .ProseMirror table td {
+  padding: 0.48em 0.72em;
+}
+
+.milkdown-root .milkdown .ProseMirror table tbody tr:hover {
+  background: #222527;
+}
+
+.source-editor {
+  padding: 34px max(42px, calc((100% - 996px) / 2)) 120px;
+  color: var(--ink);
+  background: #131516;
+  font-family: var(--terminal-font);
+  font-size: 11px;
+  line-height: 1.72;
+}
+
+.milkdown-root .milkdown .ProseMirror *::selection {
+  color: #ffffff;
+  background: #264f78;
+  text-shadow: none;
+}
+
+.milkdown-root .milkdown button:focus-visible,
+.milkdown-root .milkdown input:focus-visible,
+.milkdown-root .milkdown .ProseMirror a:focus-visible {
+  outline: 2px solid var(--crepe-color-primary);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid var(--canvas);
+  border-radius: 10px;
+  background: #34373a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #484d52;
+}
+
+@media (min-width: 1400px) {
+  .milkdown-root .milkdown .ProseMirror {
+    width: min(1180px, 100%);
+  }
+
+  .source-editor {
+    padding-inline: max(42px, calc((100% - 1096px) / 2));
+  }
+}
+
+@media (max-width: 700px) {
+  .milkdown-root .milkdown .ProseMirror {
+    padding: 24px 22px 90px;
+  }
+
+  .source-editor {
+    padding: 24px 22px 90px;
+  }
+}
