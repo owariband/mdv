@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,10 +23,189 @@ function recordDiagnostic(source, value) {
   diagnostics.push(`[${source}] ${String(value).trim()}`)
 }
 
+async function launchElectron(options) {
+  try {
+    return await electron.launch(options)
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('Process failed to launch')) throw error
+    await new Promise((resolve) => setTimeout(resolve, 750))
+    return electron.launch(options)
+  }
+}
+
+async function traceWorkspaceDocumentSwitch(page, targetName, expectedHeading) {
+  return page.getByRole('treeitem', { name: targetName, exact: true }).evaluate(
+    async (target, heading) => {
+      const shell = document.querySelector('.app-shell')
+      const initialEditor = document.querySelector('.editor-pane.document .ProseMirror')
+      const openButton = document.querySelector('.window-actions button[aria-label="Open a document"]')
+      if (!(shell instanceof HTMLElement)
+        || !(initialEditor instanceof HTMLElement)
+        || !(openButton instanceof HTMLButtonElement)) {
+        throw new Error('Expected an open Document editor before switching workspace files')
+      }
+
+      const requiredSurfaces = [
+        ['writing-room', '.writing-room'],
+        ['editor-stage', '.editor-stage'],
+        ['editor-stack', '.editor-stack'],
+        ['editor-pane', '.editor-pane.document'],
+        ['editor-layer', '.editor-pane.document > .editor-layer'],
+        ['milkdown-root', '.editor-pane.document .milkdown-root'],
+        ['ProseMirror', '.editor-pane.document .ProseMirror'],
+      ]
+      const surfacePalette = new Map(requiredSurfaces.map(([label, selector]) => {
+        const element = document.querySelector(selector)
+        if (!(element instanceof HTMLElement)) {
+          throw new Error(`Expected ${label} before switching workspace files`)
+        }
+        const style = getComputedStyle(element)
+        return [label, { color: style.color, backgroundColor: style.backgroundColor }]
+      }))
+      const loadingSelector = [
+        '.editor-stage .loading',
+        '.editor-stage .is-loading',
+        '.editor-stage .loading-overlay',
+        '.editor-stage .skeleton',
+        '.editor-stage [class*="loading"]',
+        '.editor-stage [class*="skeleton"]',
+        '.editor-stage [class*="overlay"]',
+        '.editor-stage [role="progressbar"]',
+        '.editor-stage [aria-busy="true"]',
+      ].join(', ')
+      const openButtonBefore = {
+        disabled: openButton.disabled,
+        opacity: getComputedStyle(openButton).opacity,
+      }
+      const violations = new Set()
+      let frameSamples = 0
+      let mutationSamples = 0
+
+      const sample = (source) => {
+        if (source === 'frame') frameSamples += 1
+        if (source === 'mutation') mutationSamples += 1
+
+        for (const [label, selector] of requiredSurfaces) {
+          const element = document.querySelector(selector)
+          if (!(element instanceof HTMLElement)) {
+            violations.add(`${source}: missing ${label}`)
+            continue
+          }
+          const style = getComputedStyle(element)
+          if (style.opacity !== '1') violations.add(`${source}: ${label} opacity=${style.opacity}`)
+          if (style.filter !== 'none') violations.add(`${source}: ${label} filter=${style.filter}`)
+          if (style.visibility !== 'visible') {
+            violations.add(`${source}: ${label} visibility=${style.visibility}`)
+          }
+          if (style.animationName !== 'none') {
+            violations.add(`${source}: ${label} animation=${style.animationName}`)
+          }
+          const palette = surfacePalette.get(label)
+          if (palette && style.color !== palette.color) {
+            violations.add(`${source}: ${label} color=${style.color}`)
+          }
+          if (palette && style.backgroundColor !== palette.backgroundColor) {
+            violations.add(`${source}: ${label} background=${style.backgroundColor}`)
+          }
+        }
+
+        const workspaceTree = document.querySelector('.workspace-tree')
+        if (!(workspaceTree instanceof HTMLElement)) {
+          violations.add(`${source}: missing workspace-tree`)
+        } else {
+          if (workspaceTree.classList.contains('is-busy')) {
+            violations.add(`${source}: workspace-tree gained is-busy`)
+          }
+          if (workspaceTree.getAttribute('aria-busy') === 'true') {
+            violations.add(`${source}: workspace-tree aria-busy=true`)
+          }
+        }
+
+        const currentOpenButton = document.querySelector(
+          '.window-actions button[aria-label="Open a document"]',
+        )
+        if (!(currentOpenButton instanceof HTMLButtonElement)) {
+          violations.add(`${source}: missing Open button`)
+        } else {
+          if (currentOpenButton.disabled !== openButtonBefore.disabled) {
+            violations.add(`${source}: Open button disabled changed`)
+          }
+          const openOpacity = getComputedStyle(currentOpenButton).opacity
+          if (openOpacity !== openButtonBefore.opacity) {
+            violations.add(`${source}: Open button opacity=${openOpacity}`)
+          }
+        }
+        if (document.querySelector(loadingSelector)) {
+          violations.add(`${source}: loading, skeleton, or overlay appeared`)
+        }
+
+        const visibleNonemptyEditors = [...document.querySelectorAll('.editor-stage .ProseMirror')]
+          .filter((editor) => {
+            if (!(editor instanceof HTMLElement) || !editor.textContent?.trim()) return false
+            const style = getComputedStyle(editor)
+            const rect = editor.getBoundingClientRect()
+            return style.display !== 'none'
+              && style.visibility === 'visible'
+              && style.opacity === '1'
+              && rect.width > 0
+              && rect.height > 0
+          })
+        if (visibleNonemptyEditors.length === 0) {
+          violations.add(`${source}: no visible nonempty editor`)
+        }
+      }
+
+      sample('before')
+      const observer = new MutationObserver(() => sample('mutation'))
+      observer.observe(shell, {
+        attributes: true,
+        attributeFilter: ['aria-busy', 'class', 'disabled', 'hidden', 'style'],
+        childList: true,
+        subtree: true,
+      })
+      target.click()
+
+      const deadline = performance.now() + 10_000
+      let settledFrames = 0
+      while (performance.now() < deadline && settledFrames < 2) {
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        sample('frame')
+        const currentHeading = document.querySelector(
+          '.editor-pane.document .ProseMirror h1',
+        )?.textContent
+        settledFrames = currentHeading === heading ? settledFrames + 1 : 0
+      }
+      observer.disconnect()
+      sample('after')
+      const finalOpenButton = document.querySelector(
+        '.window-actions button[aria-label="Open a document"]',
+      )
+      const openButtonAfter = finalOpenButton instanceof HTMLButtonElement
+        ? {
+            disabled: finalOpenButton.disabled,
+            opacity: getComputedStyle(finalOpenButton).opacity,
+          }
+        : null
+
+      return {
+        editorReused: initialEditor === document.querySelector('.editor-pane.document .ProseMirror'),
+        expectedHeadingReached: settledFrames === 2,
+        frameSamples,
+        mutationSamples,
+        openButtonBefore,
+        openButtonAfter,
+        violations: [...violations],
+      }
+    },
+    expectedHeading,
+  )
+}
+
 try {
   await mkdir(designDirectory, { recursive: true })
   await mkdir(join(workspaceDirectory, 'assets'))
   await writeFile(join(workspaceDirectory, 'README.md'), '# Workspace context\n\nPlain Markdown starts here.\n')
+  await writeFile(join(workspaceDirectory, 'SECOND.md'), '# Second document   \n\n\n\nSwitch without rebuilding Milkdown.\n')
   await Promise.all(Array.from({ length: 26 }, (_, index) => (
     writeFile(
       join(workspaceDirectory, `${String(index + 1).padStart(2, '0')}-mdv-note.mdv`),
@@ -93,7 +272,7 @@ try {
   await commitDocument('Expose versions and Bind', 7, referenceVersions[4])
   await mkdir(screenshotDirectory, { recursive: true })
 
-  application = await electron.launch({
+  application = await launchElectron({
     executablePath: electronExecutable,
     args: [adapter],
     env: {
@@ -103,6 +282,15 @@ try {
         openFile: file,
         openDirectory: workspaceDirectory,
         referenceResponses: [0, 1],
+        workspaceOpenDelayMs: 120,
+        contextActions: [
+          'copy-path',
+          'new-folder',
+          'new-file',
+          'rename',
+          'duplicate',
+          'open',
+        ],
       }),
     },
     timeout: 30_000,
@@ -244,16 +432,16 @@ try {
 
   await page.getByRole('treeitem', { name: 'README.md' }).click()
   await page.waitForFunction(() => (
-    document.querySelector('.editor-stack > .editor-layer .ProseMirror h1')?.textContent === 'Workspace context'
+    document.querySelector('.editor-pane.document .ProseMirror h1')?.textContent === 'Workspace context'
   ))
   assert.equal(await page.getByRole('button', { name: 'Worktree' }).count(), 0)
   assert.equal(await page.locator('.active-document-panel').count(), 0)
-  assert.equal(await page.locator('.editor-pane').count(), 0)
+  assert.equal(await page.locator('.editor-pane').count(), 1)
   assert.equal(await page.locator('.editor-layer').count(), 1)
   assert.equal(await page.locator('.editor-layer.reference').count(), 0)
   assert.equal(await page.locator('.statusbar').count(), 0)
 
-  const plainEditor = page.locator('.editor-stack > .editor-layer .ProseMirror')
+  const plainEditor = page.locator('.editor-pane.document .ProseMirror')
   assert.equal(await plainEditor.getAttribute('contenteditable'), 'true')
   await plainEditor.locator('p').last().click()
   await page.keyboard.press('End')
@@ -263,11 +451,48 @@ try {
   assert.match(await readFile(join(workspaceDirectory, 'README.md'), 'utf8'), /Edited as a plain file\./)
   await page.screenshot({ path: join(screenshotDirectory, 'plain-markdown.png') })
 
+  const markdownSwitchTrace = await traceWorkspaceDocumentSwitch(
+    page,
+    'SECOND.md',
+    'Second document',
+  )
+  assert.equal(markdownSwitchTrace.expectedHeadingReached, true)
+  assert.ok(markdownSwitchTrace.frameSamples >= 2)
+  assert.ok(markdownSwitchTrace.mutationSamples >= 1)
+  assert.deepEqual(markdownSwitchTrace.openButtonAfter, markdownSwitchTrace.openButtonBefore)
+  assert.deepEqual(markdownSwitchTrace.violations, [])
+  assert.equal(markdownSwitchTrace.editorReused, true)
+  assert.equal(await page.locator('.workspace-tree').getAttribute('aria-busy'), 'false')
+  await page.waitForSelector('.normalization-action')
+  assert.equal(await page.getByRole('button', { name: 'Save Markdown file' }).isDisabled(), true)
+  await plainEditor.focus()
+  await page.keyboard.press('Meta+z')
+  assert.equal(await plainEditor.locator('h1').innerText(), 'Second document')
+  assert.equal(await page.getByRole('button', { name: 'Save Markdown file' }).isDisabled(), true)
+
+  await page.getByRole('treeitem', { name: 'README.md' }).click()
+  await page.waitForFunction(() => (
+    document.querySelector('.editor-pane.document .ProseMirror h1')?.textContent === 'Workspace context'
+  ))
+  assert.match(await plainEditor.innerText(), /Edited as a plain file\./)
+
   await page.getByRole('treeitem', { name: 'Design' }).click()
   assert.equal(await page.getByRole('treeitem', { name: 'Design' }).getAttribute('aria-expanded'), 'true')
+  const workspaceMenuToggle = page.getByRole('button', { name: 'Workspace menu', exact: true })
+  await workspaceMenuToggle.click()
   await page.getByRole('button', { name: 'Refresh folder' }).click()
   assert.equal(await page.getByRole('treeitem', { name: 'Design' }).getAttribute('aria-expanded'), 'true')
-  await page.getByRole('treeitem', { name: 'milkdown-demo.mdv' }).click()
+  const mdvSwitchTrace = await traceWorkspaceDocumentSwitch(
+    page,
+    'milkdown-demo.mdv',
+    'milkdownv editor',
+  )
+  assert.equal(mdvSwitchTrace.expectedHeadingReached, true)
+  assert.ok(mdvSwitchTrace.frameSamples >= 2)
+  assert.ok(mdvSwitchTrace.mutationSamples >= 1)
+  assert.deepEqual(mdvSwitchTrace.openButtonAfter, mdvSwitchTrace.openButtonBefore)
+  assert.deepEqual(mdvSwitchTrace.violations, [])
+  assert.equal(mdvSwitchTrace.editorReused, true)
   await Promise.race([
     page.waitForSelector('.mdv-dual-stack'),
     page.waitForSelector('.statusbar.danger').then(async () => {
@@ -478,13 +703,63 @@ try {
     await worktreePanel.evaluate((element) => element.getBoundingClientRect().height) - expandedWorktreeHeight,
   ) <= 1)
 
-  const sidebarOpenLabel = page.locator('.sidebar-open span')
-  assert.equal(await sidebarOpenLabel.innerText(), 'Open Folder…')
-  await documentEditor.focus()
-  await page.mouse.move(900, 260)
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('.sidebar-open span')).opacity === '0')
-  await page.locator('.sidebar-open').hover()
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('.sidebar-open span')).opacity === '1')
+  const workspaceName = page.locator('.sidebar-workspace-button span')
+  assert.equal(await workspaceName.innerText(), 'Hypnos Notes')
+  const workspaceNameBeforeHover = await workspaceName.evaluate((element) => ({
+    opacity: getComputedStyle(element).opacity,
+    width: element.getBoundingClientRect().width,
+  }))
+  await page.locator('.tree-rail').hover({ position: { x: 120, y: 180 } })
+  const workspaceNameAfterHover = await workspaceName.evaluate((element) => ({
+    opacity: getComputedStyle(element).opacity,
+    width: element.getBoundingClientRect().width,
+  }))
+  assert.equal(workspaceNameBeforeHover.opacity, '1')
+  assert.equal(workspaceNameAfterHover.opacity, '1')
+  assert.ok(Math.abs(workspaceNameAfterHover.width - workspaceNameBeforeHover.width) <= 0.5)
+
+  const drawerLayoutBefore = await page.evaluate(() => {
+    const sidebar = document.querySelector('.tree-rail').getBoundingClientRect()
+    const writingRoom = document.querySelector('.writing-room').getBoundingClientRect()
+    return { sidebarWidth: sidebar.width, writingRoomLeft: writingRoom.left }
+  })
+  await workspaceMenuToggle.click()
+  await page.waitForSelector('.workspace-drawer')
+  await page.waitForFunction(() => (
+    getComputedStyle(document.querySelector('.workspace-drawer')).opacity === '1'
+  ))
+  assert.equal(await workspaceMenuToggle.getAttribute('aria-expanded'), 'true')
+  const workspaceDrawer = page.locator('.workspace-drawer')
+  assert.equal(await workspaceDrawer.getByRole('button', { name: 'Open a folder' }).count(), 1)
+  assert.equal(await workspaceDrawer.getByRole('button', { name: 'Refresh folder' }).count(), 1)
+  const workspaceDrawerText = await workspaceDrawer.innerText()
+  assert.match(workspaceDrawerText, /Current folder\s+Hypnos Notes/)
+  assert.doesNotMatch(workspaceDrawerText, /New File|Finder|Recent|Sort/)
+  const drawerLayoutOpen = await page.evaluate(() => {
+    const sidebar = document.querySelector('.tree-rail').getBoundingClientRect()
+    const writingRoom = document.querySelector('.writing-room').getBoundingClientRect()
+    return { sidebarWidth: sidebar.width, writingRoomLeft: writingRoom.left }
+  })
+  assert.deepEqual(drawerLayoutOpen, drawerLayoutBefore)
+  await page.screenshot({ path: join(screenshotDirectory, 'workspace-drawer.png') })
+
+  await page.keyboard.press('Escape')
+  await page.waitForSelector('.workspace-drawer', { state: 'detached' })
+  assert.equal(await workspaceMenuToggle.getAttribute('aria-expanded'), 'false')
+  assert.equal(await page.evaluate(() => (
+    document.activeElement === document.querySelector('.sidebar-workspace-button')
+  )), true)
+
+  await page.getByRole('button', { name: 'Workspace: Hypnos Notes' }).click()
+  await page.waitForSelector('.workspace-drawer')
+  await page.mouse.click(900, 260)
+  await page.waitForSelector('.workspace-drawer', { state: 'detached' })
+
+  await workspaceMenuToggle.click()
+  await page.waitForSelector('.workspace-drawer')
+  await workspaceMenuToggle.click()
+  await page.waitForSelector('.workspace-drawer', { state: 'detached' })
+  assert.equal(await workspaceMenuToggle.getAttribute('aria-expanded'), 'false')
 
   await referenceEditor.locator('h1').click()
   assert.equal(await page.getByRole('tab', { name: /Reference/ }).getAttribute('aria-selected'), 'true')
@@ -548,6 +823,122 @@ try {
     new Set(current.listVersions({ tree: 'document' }).map((version) => version.id)),
     new Set(documentVersions),
   )
+
+  await page.getByRole('treeitem', { name: 'README.md', exact: true }).click({ button: 'right' })
+  await page.waitForFunction(() => document.querySelector('.statusbar')?.textContent?.includes('Path copied'))
+  assert.equal(
+    await application.evaluate(({ clipboard }) => clipboard.readText()),
+    await realpath(join(workspaceDirectory, 'README.md')),
+  )
+
+  const designTreeItem = page.getByRole('treeitem', { name: 'Design', exact: true })
+  await designTreeItem.click({ button: 'right' })
+  await page.getByRole('dialog', { name: 'New folder' }).waitFor()
+  const workspaceNameLayerStyle = await page.locator('.workspace-name-layer').evaluate((element) => ({
+    backdropFilter: getComputedStyle(element).backdropFilter,
+    backgroundColor: getComputedStyle(element).backgroundColor,
+  }))
+  assert.equal(workspaceNameLayerStyle.backdropFilter, 'none')
+  assert.equal(workspaceNameLayerStyle.backgroundColor, 'rgba(0, 0, 0, 0)')
+  await page.screenshot({ path: join(screenshotDirectory, 'workspace-context-name.png') })
+  await page.locator('#workspace-item-name').fill('Context Folder')
+  await page.getByRole('button', { name: 'Create', exact: true }).click()
+  await page.getByRole('treeitem', { name: 'Context Folder', exact: true }).waitFor()
+  assert.equal((await stat(join(designDirectory, 'Context Folder'))).isDirectory(), true)
+
+  await designTreeItem.click({ button: 'right' })
+  await page.getByRole('dialog', { name: 'New Markdown file' }).waitFor()
+  await page.locator('#workspace-item-name').fill('Context Action')
+  await page.getByRole('button', { name: 'Create', exact: true }).click()
+  await page.waitForFunction(() => (
+    document.querySelector('.document-title span')?.textContent === 'Context Action.md'
+  ))
+  const contextActionEditor = page.locator('.editor-pane.document .ProseMirror')
+  await contextActionEditor.waitFor()
+  await page.locator(
+    '.editor-pane.document .view-switch button[aria-label="Markdown source"]',
+  ).click()
+  await page.locator('.editor-pane.document textarea.source-editor').fill(
+    '# Context action\n\nCreated from the workspace context menu.\n',
+  )
+  await page.locator(
+    '.editor-pane.document .view-switch button[aria-label="Visual editor"]',
+  ).click()
+  await page.getByRole('button', { name: 'Save Markdown file' }).click()
+  await page.waitForFunction(() => (
+    document.querySelector('.statusbar')?.textContent?.includes('Markdown file saved')
+  ))
+
+  await page.getByRole('treeitem', { name: 'Context Action.md', exact: true })
+    .click({ button: 'right' })
+  await page.getByRole('dialog', { name: 'Rename item' }).waitFor()
+  assert.equal(await page.locator('#workspace-item-name').inputValue(), 'Context Action.md')
+  await page.locator('#workspace-item-name').fill('Renamed Context')
+  await page.getByRole('button', { name: 'Rename', exact: true }).click()
+  await page.waitForFunction(() => (
+    document.querySelector('.document-title span')?.textContent === 'Renamed Context.md'
+    && document.querySelector('.editor-pane.document .ProseMirror h1')?.textContent === 'Context action'
+  ))
+  assert.match(
+    await readFile(join(designDirectory, 'Renamed Context.md'), 'utf8'),
+    /Created from the workspace context menu/,
+  )
+
+  await page.getByRole('treeitem', { name: 'Renamed Context.md', exact: true })
+    .click({ button: 'right' })
+  await page.getByRole('treeitem', { name: 'Renamed Context copy.md', exact: true }).waitFor()
+  assert.equal(
+    await readFile(join(designDirectory, 'Renamed Context copy.md'), 'utf8'),
+    await readFile(join(designDirectory, 'Renamed Context.md'), 'utf8'),
+  )
+
+  await page.locator(
+    '.editor-pane.document .view-switch button[aria-label="Markdown source"]',
+  ).click()
+  const sourceSwitchEditor = page.locator('.editor-pane.document textarea.source-editor')
+  await sourceSwitchEditor.evaluate((element) => {
+    window.__milkdownvSourceEditor = element
+  })
+  const sourceStyleBeforeSwitch = await sourceSwitchEditor.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      color: style.color,
+      backgroundColor: style.backgroundColor,
+      opacity: style.opacity,
+      filter: style.filter,
+    }
+  })
+  await page.getByRole('treeitem', { name: 'SECOND.md', exact: true }).click({ button: 'right' })
+  await page.waitForFunction(() => (
+    document.querySelector('.editor-pane.document textarea.source-editor')?.readOnly === true
+  ))
+  assert.deepEqual(
+    await sourceSwitchEditor.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        opacity: style.opacity,
+        filter: style.filter,
+      }
+    }),
+    sourceStyleBeforeSwitch,
+  )
+  await page.waitForFunction(() => (
+    document.querySelector('.editor-pane.document textarea.source-editor')?.value
+      .includes('# Second document')
+    && document.querySelector('.editor-pane.document textarea.source-editor')?.readOnly === false
+  ))
+  assert.equal(await page.evaluate(() => (
+    window.__milkdownvSourceEditor
+      === document.querySelector('.editor-pane.document textarea.source-editor')
+  )), true)
+  await page.locator(
+    '.editor-pane.document .view-switch button[aria-label="Visual editor"]',
+  ).click()
+  await page.waitForFunction(() => (
+    document.querySelector('.editor-pane.document .ProseMirror h1')?.textContent === 'Second document'
+  ))
 } catch (error) {
   if (diagnostics.length > 0) console.error(diagnostics.join('\n'))
   if (page) {

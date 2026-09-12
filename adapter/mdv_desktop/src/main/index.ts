@@ -1,5 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
-import { extname, isAbsolute, join } from 'node:path'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  shell,
+  type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
+} from 'electron'
+import { extname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   MdvSession,
@@ -26,6 +36,10 @@ import {
   type SaveMarkdownResult,
   type SaveTreeRequest,
   type SaveTreeResult,
+  type WorkspaceActionRequest,
+  type WorkspaceActionResult,
+  type WorkspaceContextAction,
+  type WorkspaceNodeRequest,
   type WorkspaceRequest,
 } from '../shared/ipc.js'
 
@@ -44,10 +58,13 @@ interface E2eDialogPlan {
   readonly openFile: string | undefined
   readonly openDirectory: string | undefined
   readonly referenceResponses: readonly (0 | 1)[]
+  readonly contextActions: readonly WorkspaceContextAction[]
+  readonly workspaceOpenDelayMs: number
 }
 
 const e2eDialogPlan = readE2eDialogPlan()
 let e2eReferenceResponse = 0
+let e2eContextAction = 0
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -161,6 +178,9 @@ function registerIpc(): void {
         }
         const requestEpoch = ++navigationEpoch
         const target = await workspace.resolveDocument(request.nodeId)
+        if (e2eDialogPlan && e2eDialogPlan.workspaceOpenDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, e2eDialogPlan.workspaceOpenDelayMs))
+        }
         return {
           ok: true,
           value: await activateDocument(window, target, requestEpoch, async () => {
@@ -173,6 +193,137 @@ function registerIpc(): void {
             }
           }),
         }
+      } catch (error) {
+        report(error)
+        return { ok: false, error: toPublicFailure(error) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    ipcChannels.showWorkspaceContextMenu,
+    async (
+      event,
+      request: WorkspaceNodeRequest,
+    ): Promise<DesktopResult<WorkspaceContextAction | null>> => {
+      try {
+        const window = requireTrustedSender(event)
+        const workspace = requireWorkspace(request)
+        const node = await workspace.resolveNode(request?.nodeId)
+        return { ok: true, value: await selectWorkspaceContextAction(window, node.kind, node.root) }
+      } catch (error) {
+        report(error)
+        return { ok: false, error: toPublicFailure(error) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    ipcChannels.runWorkspaceAction,
+    async (
+      event,
+      request: WorkspaceActionRequest,
+    ): Promise<DesktopResult<WorkspaceActionResult>> => {
+      try {
+        const window = requireTrustedSender(event)
+        const workspace = requireWorkspace(request)
+        if (!request || typeof request !== 'object' || typeof request.action !== 'string') {
+          throw new FolderWorkspaceError('INVALID_ARGUMENT', 'The workspace action is invalid.')
+        }
+
+        if (request.action === 'new-file') {
+          const result = await workspace.createMarkdownFile(request.nodeId, request.name)
+          return { ok: true, value: { workspace: result.view, nodeId: result.nodeId } }
+        }
+        if (request.action === 'new-folder') {
+          const result = await workspace.createDirectory(request.nodeId, request.name)
+          return { ok: true, value: { workspace: result.view, nodeId: result.nodeId } }
+        }
+        if (request.action === 'duplicate') {
+          const result = await workspace.duplicateMarkdown(request.nodeId)
+          return { ok: true, value: { workspace: result.view, nodeId: result.nodeId } }
+        }
+        if (request.action === 'rename') {
+          const target = await workspace.resolveNode(request.nodeId)
+          let result
+          try {
+            result = await workspace.renameEntry(request.nodeId, request.name)
+          } catch (error) {
+            if (error instanceof FolderWorkspaceError && error.committed) {
+              const activeDocumentInvalidated = deactivateSessionWithin(
+                window,
+                workspace,
+                target.path,
+                target.kind === 'directory',
+              )
+              throw new FolderWorkspaceError(
+                error.code,
+                error.message,
+                true,
+                activeDocumentInvalidated,
+              )
+            }
+            throw error
+          }
+          const activeDocumentInvalidated = deactivateSessionWithin(
+            window,
+            workspace,
+            target.path,
+            target.kind === 'directory',
+          )
+          return {
+            ok: true,
+            value: {
+              workspace: result.view,
+              nodeId: result.nodeId,
+              ...(activeDocumentInvalidated ? { activeDocumentInvalidated: true as const } : {}),
+            },
+          }
+        }
+        if (request.action === 'move-to-trash') {
+          const target = await workspace.resolveNode(request.nodeId)
+          if (target.root) {
+            throw new FolderWorkspaceError('INVALID_ARGUMENT', 'The workspace root cannot be moved to Trash here.')
+          }
+          try {
+            await shell.trashItem(target.path)
+          } catch {
+            throw new FolderWorkspaceError('IO_ERROR', 'The workspace item could not be moved to Trash.')
+          }
+          const activeDocumentInvalidated = deactivateSessionWithin(
+            window,
+            workspace,
+            target.path,
+            target.kind === 'directory',
+          )
+          try {
+            return {
+              ok: true,
+              value: {
+                workspace: await workspace.refreshAfterExternalChange(),
+                ...(activeDocumentInvalidated ? { activeDocumentInvalidated: true as const } : {}),
+              },
+            }
+          } catch {
+            throw new FolderWorkspaceError(
+              'IO_ERROR',
+              'The item was moved to Trash, but the folder could not be refreshed.',
+              true,
+              activeDocumentInvalidated,
+            )
+          }
+        }
+        if (request.action === 'copy-path') {
+          const target = await workspace.resolveNode(request.nodeId)
+          clipboard.writeText(target.path)
+          return { ok: true, value: {} }
+        }
+        if (request.action === 'show-in-finder') {
+          const target = await workspace.resolveNode(request.nodeId)
+          shell.showItemInFolder(target.path)
+          return { ok: true, value: {} }
+        }
+        throw new FolderWorkspaceError('INVALID_ARGUMENT', 'The workspace action is invalid.')
       } catch (error) {
         report(error)
         return { ok: false, error: toPublicFailure(error) }
@@ -279,6 +430,77 @@ async function selectWorkspaceDirectory(window: BrowserWindow): Promise<string |
   return selection.canceled ? undefined : selection.filePaths[0]
 }
 
+function selectWorkspaceContextAction(
+  window: BrowserWindow,
+  kind: 'directory' | 'mdv' | 'markdown',
+  root: boolean,
+): Promise<WorkspaceContextAction | null> {
+  if (e2eDialogPlan) {
+    const action = e2eDialogPlan.contextActions[e2eContextAction]
+    if (!action) throw new Error('The milkdownv E2E dialog plan has no remaining context action')
+    if (!workspaceContextActionAvailable(action, kind, root)) {
+      throw new Error(`The milkdownv E2E context action ${action} is unavailable for this item`)
+    }
+    e2eContextAction += 1
+    return Promise.resolve(action)
+  }
+
+  return new Promise((resolve) => {
+    let selected: WorkspaceContextAction | null = null
+    const item = (
+      label: string,
+      action: WorkspaceContextAction,
+    ): MenuItemConstructorOptions => ({
+      label,
+      click: () => {
+        selected = action
+      },
+    })
+    const createItems: MenuItemConstructorOptions[] = [
+      item('New File', 'new-file'),
+      item('New Folder', 'new-folder'),
+    ]
+    const locateItems: MenuItemConstructorOptions[] = [
+      item('Copy Path', 'copy-path'),
+      item('Show in Finder', 'show-in-finder'),
+    ]
+    let template: MenuItemConstructorOptions[]
+
+    if (kind === 'directory') {
+      template = [
+        ...createItems,
+        ...(!root ? [
+          { type: 'separator' as const },
+          item('Rename…', 'rename'),
+          item('Move to Trash…', 'move-to-trash'),
+        ] : []),
+        { type: 'separator' },
+        ...locateItems,
+      ]
+    } else {
+      template = [
+        item('Open', 'open'),
+        { type: 'separator' },
+        ...createItems,
+        ...(kind === 'markdown' ? [
+          { type: 'separator' as const },
+          item('Duplicate', 'duplicate'),
+        ] : []),
+        { type: 'separator' },
+        item('Rename…', 'rename'),
+        item('Move to Trash…', 'move-to-trash'),
+        { type: 'separator' },
+        ...locateItems,
+      ]
+    }
+
+    Menu.buildFromTemplate(template).popup({
+      window,
+      callback: () => resolve(selected),
+    })
+  })
+}
+
 async function activateDocument(
   window: BrowserWindow,
   target: ResolvedWorkspaceDocument,
@@ -341,16 +563,50 @@ function readE2eDialogPlan(): E2eDialogPlan | undefined {
       && (typeof value.openDirectory !== 'string' || !isAbsolute(value.openDirectory)))
     || (value.openFile === undefined && value.openDirectory === undefined)
     || !Array.isArray(value.referenceResponses)
-    || value.referenceResponses.some((response) => response !== 0 && response !== 1)) {
+    || value.referenceResponses.some((response) => response !== 0 && response !== 1)
+    || (value.contextActions !== undefined
+      && (!Array.isArray(value.contextActions)
+        || value.contextActions.some((action) => !isWorkspaceContextAction(action))))
+    || (value.workspaceOpenDelayMs !== undefined
+      && (typeof value.workspaceOpenDelayMs !== 'number'
+        || !Number.isInteger(value.workspaceOpenDelayMs)
+        || value.workspaceOpenDelayMs < 0
+        || value.workspaceOpenDelayMs > 1_000))) {
     throw new Error(
-      'MDV_DESKTOP_E2E_DIALOG_PLAN must contain an absolute openFile or openDirectory and 0/1 Reference responses',
+      'MDV_DESKTOP_E2E_DIALOG_PLAN must contain valid paths, Reference responses, and context actions',
     )
   }
   return {
     openFile: typeof value.openFile === 'string' ? value.openFile : undefined,
     openDirectory: typeof value.openDirectory === 'string' ? value.openDirectory : undefined,
     referenceResponses: value.referenceResponses,
+    contextActions: Array.isArray(value.contextActions) ? value.contextActions : [],
+    workspaceOpenDelayMs: typeof value.workspaceOpenDelayMs === 'number'
+      ? value.workspaceOpenDelayMs
+      : 0,
   }
+}
+
+function isWorkspaceContextAction(value: unknown): value is WorkspaceContextAction {
+  return value === 'open'
+    || value === 'new-file'
+    || value === 'new-folder'
+    || value === 'duplicate'
+    || value === 'rename'
+    || value === 'move-to-trash'
+    || value === 'copy-path'
+    || value === 'show-in-finder'
+}
+
+function workspaceContextActionAvailable(
+  action: WorkspaceContextAction,
+  kind: 'directory' | 'mdv' | 'markdown',
+  root: boolean,
+): boolean {
+  if (action === 'open') return kind !== 'directory'
+  if (action === 'duplicate') return kind === 'markdown'
+  if (action === 'rename' || action === 'move-to-trash') return !root
+  return true
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -395,6 +651,31 @@ function requireWorkspace(request: WorkspaceRequest): FolderWorkspace {
     throw new FolderWorkspaceError('STALE_WORKSPACE', 'The active workspace changed. Open the folder again.')
   }
   return activeWorkspace
+}
+
+function deactivateSessionWithin(
+  window: BrowserWindow,
+  workspace: FolderWorkspace,
+  targetPath: string,
+  directory: boolean,
+): boolean {
+  const sessionPath = activeSession?.kind === 'mdv'
+    ? activeSession.session.packagePath
+    : activeSession?.session.filePath
+  if (!sessionPath) return false
+  const relativePath = relative(targetPath, sessionPath)
+  const affected = directory
+    ? relativePath === ''
+      || (relativePath !== '..'
+        && !relativePath.startsWith(`..${sep}`)
+        && !isAbsolute(relativePath))
+    : targetPath === sessionPath
+  if (!affected) return false
+
+  activeSession = undefined
+  navigationEpoch += 1
+  window.setTitle(`${workspace.view.root.name} — milkdownv`)
+  return true
 }
 
 function report(error: unknown): void {

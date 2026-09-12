@@ -5,6 +5,8 @@ export const ipcChannels = {
   selectWorkspace: 'mdv-desktop:select-workspace',
   refreshWorkspace: 'mdv-desktop:refresh-workspace',
   openWorkspaceDocument: 'mdv-desktop:open-workspace-document',
+  showWorkspaceContextMenu: 'mdv-desktop:show-workspace-context-menu',
+  runWorkspaceAction: 'mdv-desktop:run-workspace-action',
   saveDocument: 'mdv-desktop:save-document',
   saveReference: 'mdv-desktop:save-reference',
   saveMarkdown: 'mdv-desktop:save-markdown',
@@ -37,8 +39,35 @@ export interface WorkspaceRequest {
   readonly workspaceId: string
 }
 
-export interface OpenWorkspaceDocumentRequest extends WorkspaceRequest {
+export interface WorkspaceNodeRequest extends WorkspaceRequest {
   readonly nodeId: string
+}
+
+export type OpenWorkspaceDocumentRequest = WorkspaceNodeRequest
+
+export type WorkspaceContextAction =
+  | 'open'
+  | 'new-file'
+  | 'new-folder'
+  | 'duplicate'
+  | 'rename'
+  | 'move-to-trash'
+  | 'copy-path'
+  | 'show-in-finder'
+
+export type WorkspaceActionRequest =
+  | (WorkspaceNodeRequest & {
+      readonly action: 'new-file' | 'new-folder' | 'rename'
+      readonly name: string
+    })
+  | (WorkspaceNodeRequest & {
+      readonly action: 'duplicate' | 'move-to-trash' | 'copy-path' | 'show-in-finder'
+    })
+
+export interface WorkspaceActionResult {
+  readonly workspace?: FolderWorkspaceView
+  readonly nodeId?: string
+  readonly activeDocumentInvalidated?: true
 }
 
 export interface TreeView {
@@ -131,6 +160,7 @@ export interface DesktopFailure {
   readonly reason?: string
   readonly tree?: DesktopTree
   readonly committed?: boolean
+  readonly activeDocumentInvalidated?: true
 }
 
 export type DesktopResult<T> =
@@ -142,6 +172,10 @@ export interface MdvDesktopApi {
   selectWorkspace(): Promise<DesktopResult<FolderWorkspaceView | null>>
   refreshWorkspace(request: WorkspaceRequest): Promise<DesktopResult<FolderWorkspaceView>>
   openWorkspaceDocument(request: OpenWorkspaceDocumentRequest): Promise<DesktopResult<OpenedDocumentView>>
+  showWorkspaceContextMenu(
+    request: WorkspaceNodeRequest,
+  ): Promise<DesktopResult<WorkspaceContextAction | null>>
+  runWorkspaceAction(request: WorkspaceActionRequest): Promise<DesktopResult<WorkspaceActionResult>>
   saveDocument(request: SaveTreeRequest): Promise<DesktopResult<SaveTreeResult>>
   saveReference(request: SaveTreeRequest): Promise<DesktopResult<SaveTreeResult>>
   saveMarkdown(request: SaveTreeRequest): Promise<DesktopResult<SaveMarkdownResult>>

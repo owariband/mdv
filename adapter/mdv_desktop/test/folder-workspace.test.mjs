@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rename,
   rm,
@@ -13,6 +14,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   FolderWorkspace,
+  FolderWorkspaceError,
+  toWorkspaceFailure,
 } from '../out/main/folder-workspace.js'
 
 async function fixture(t) {
@@ -30,6 +33,18 @@ function flatten(node, result = []) {
   }
   return result
 }
+
+test('reports committed mutations that invalidated the active document', () => {
+  assert.deepEqual(
+    toWorkspaceFailure(new FolderWorkspaceError('IO_ERROR', 'Refresh failed.', true, true)),
+    {
+      code: 'IO_ERROR',
+      message: 'Refresh failed.',
+      committed: true,
+      activeDocumentInvalidated: true,
+    },
+  )
+})
 
 test('returns an opaque, filtered Markdown workspace without paths', async (t) => {
   const { temporaryDirectory, root } = await fixture(t)
@@ -152,4 +167,114 @@ test('keeps the last complete snapshot when refresh fails', async (t) => {
   await assert.rejects(workspace.refresh(), (error) => error?.code === 'ACCESS_DENIED')
   assert.equal(workspace.view, view)
   assert.equal(JSON.stringify(workspace.view).includes('must-not-leak'), false)
+})
+
+test('creates Markdown files and folders relative to the clicked workspace item', async (t) => {
+  const { root } = await fixture(t)
+  await writeFile(join(root, 'existing.md'), '# Existing\n')
+  const { workspace, view } = await FolderWorkspace.open(root)
+  const existing = flatten(view.root).find((node) => node.name === 'existing.md')
+  assert.ok(existing)
+
+  const siblingFolder = await workspace.createDirectory(existing.id, 'Sibling')
+  assert.equal(siblingFolder.view.revision, view.revision + 1)
+  assert.equal(flatten(siblingFolder.view.root).some((node) => node.name === 'Sibling'), true)
+
+  const nestedFile = await workspace.createMarkdownFile(siblingFolder.nodeId, 'draft')
+  const draft = flatten(nestedFile.view.root).find((node) => node.id === nestedFile.nodeId)
+  assert.deepEqual(draft && { kind: draft.kind, name: draft.name }, {
+    kind: 'markdown',
+    name: 'draft.md',
+  })
+  assert.equal(await readFile(join(root, 'Sibling', 'draft.md'), 'utf8'), '')
+
+  const renamed = await workspace.renameEntry(nestedFile.nodeId, 'finished')
+  const finished = flatten(renamed.view.root).find((node) => node.id === renamed.nodeId)
+  assert.deepEqual(finished && { kind: finished.kind, name: finished.name }, {
+    kind: 'markdown',
+    name: 'finished.md',
+  })
+  assert.equal(await readFile(join(root, 'Sibling', 'finished.md'), 'utf8'), '')
+  await assert.rejects(workspace.resolveDocument(nestedFile.nodeId), (error) => error?.code === 'STALE_ENTRY')
+})
+
+test('duplicates Markdown with a collision-safe sibling name but rejects MDV identity copies', async (t) => {
+  const { root } = await fixture(t)
+  await Promise.all([
+    writeFile(join(root, 'note.md'), '# Original\n'),
+    writeFile(join(root, 'package.mdv'), new Uint8Array()),
+  ])
+  const { workspace, view } = await FolderWorkspace.open(root)
+  const markdown = flatten(view.root).find((node) => node.name === 'note.md')
+  const mdv = flatten(view.root).find((node) => node.name === 'package.mdv')
+  assert.ok(markdown)
+  assert.ok(mdv)
+
+  const first = await workspace.duplicateMarkdown(markdown.id)
+  const second = await workspace.duplicateMarkdown(markdown.id)
+  assert.equal(flatten(first.view.root).some((node) => node.name === 'note copy.md'), true)
+  assert.equal(flatten(second.view.root).some((node) => node.name === 'note copy 2.md'), true)
+  assert.equal(await readFile(join(root, 'note copy.md'), 'utf8'), '# Original\n')
+  assert.equal(await readFile(join(root, 'note copy 2.md'), 'utf8'), '# Original\n')
+  await assert.rejects(
+    workspace.duplicateMarkdown(mdv.id),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('rejects unsafe names, collisions, root renames, and stale symlink parents', async (t) => {
+  const { temporaryDirectory, root } = await fixture(t)
+  const nested = join(root, 'Nested')
+  const moved = join(temporaryDirectory, 'moved-nested')
+  const external = join(temporaryDirectory, 'external')
+  await Promise.all([
+    mkdir(nested),
+    mkdir(external),
+    writeFile(join(root, 'taken.md'), '# Taken\n'),
+  ])
+  const { workspace, view } = await FolderWorkspace.open(root)
+  const nestedNode = flatten(view.root).find((node) => node.name === 'Nested')
+  const taken = flatten(view.root).find((node) => node.name === 'taken.md')
+  assert.ok(nestedNode)
+  assert.ok(taken)
+
+  for (const name of ['../escape', '.hidden', 'wrong.txt', 'bad/name']) {
+    await assert.rejects(
+      async () => workspace.createMarkdownFile(view.root.id, name),
+      (error) => error?.code === 'INVALID_ARGUMENT',
+    )
+  }
+  await assert.rejects(
+    workspace.createMarkdownFile(view.root.id, 'taken.md'),
+    (error) => error?.code === 'ALREADY_EXISTS',
+  )
+  await assert.rejects(
+    workspace.renameEntry(view.root.id, 'renamed-root'),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  )
+  await assert.rejects(
+    workspace.renameEntry(taken.id, 'wrong.mdv'),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  )
+
+  await rename(nested, moved)
+  await symlink(external, nested)
+  await assert.rejects(
+    workspace.createMarkdownFile(nestedNode.id, 'outside'),
+    (error) => error?.code === 'STALE_ENTRY',
+  )
+  await assert.rejects(realpath(join(external, 'outside.md')), (error) => error?.code === 'ENOENT')
+})
+
+test('serializes mutation snapshots ahead of later refreshes', async (t) => {
+  const { root } = await fixture(t)
+  const { workspace, view } = await FolderWorkspace.open(root)
+
+  const mutationPromise = workspace.createMarkdownFile(view.root.id, 'queued')
+  const refreshPromise = workspace.refresh()
+  const [mutation, refreshed] = await Promise.all([mutationPromise, refreshPromise])
+
+  assert.equal(mutation.view.revision, view.revision + 1)
+  assert.equal(refreshed.revision, mutation.view.revision + 1)
+  assert.equal(flatten(refreshed.root).some((node) => node.name === 'queued.md'), true)
 })

@@ -7,7 +7,7 @@ import { listItem } from '@milkdown/crepe/feature/list-item'
 import { placeholder } from '@milkdown/crepe/feature/placeholder'
 import { table } from '@milkdown/crepe/feature/table'
 import { toolbar } from '@milkdown/crepe/feature/toolbar'
-import type { Editor } from '@milkdown/kit/core'
+import { editorViewCtx, serializerCtx, type Editor } from '@milkdown/kit/core'
 import { uploadConfig } from '@milkdown/kit/plugin/upload'
 import { Plugin } from '@milkdown/kit/prose/state'
 import { $prose, replaceAll } from '@milkdown/kit/utils'
@@ -23,9 +23,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   changed: [event: { sessionId: string; tree: DesktopTree; revision: number }]
-  ready: [event: { sessionId: string; tree: DesktopTree; canonicalMarkdown: string }]
+  ready: [event: { sessionId: string; tree: DesktopTree }]
+  canonicalized: [event: { sessionId: string; tree: DesktopTree; canonicalMarkdown: string }]
   failed: [event: { sessionId: string; message: string }]
 }>()
+
+interface EditorDocument {
+  readonly sessionId: string
+  readonly markdown: string
+}
 
 const editorRoot = ref<HTMLDivElement>()
 const sourceMarkdown = ref(props.initialMarkdown)
@@ -35,6 +41,13 @@ let builder: CrepeBuilder | undefined
 let editorRevision = 0
 let trackTransactions = false
 let disposed = false
+let initialized = false
+let documentSequence = 0
+let canonicalizationHandle: number | undefined
+let requestedDocument: EditorDocument = {
+  sessionId: props.sessionId,
+  markdown: props.initialMarkdown,
+}
 
 function disableImageUploads(editor: Editor): void {
   editor.config((ctx) => {
@@ -61,13 +74,68 @@ function markChanged(): void {
   emit('changed', { sessionId: props.sessionId, tree: props.tree, revision: editorRevision })
 }
 
+function loadDocument(
+  current: CrepeBuilder,
+  document: EditorDocument,
+  replaceContent: boolean,
+): void {
+  const sequence = ++documentSequence
+  if (canonicalizationHandle !== undefined) {
+    window.cancelIdleCallback(canonicalizationHandle)
+    canonicalizationHandle = undefined
+  }
+  trackTransactions = false
+  editorRevision = 0
+  sourceMarkdown.value = document.markdown
+
+  try {
+    if (replaceContent) current.editor.action(replaceAll(document.markdown, true))
+    if (disposed || builder !== current) return
+    const serializeSnapshot = current.editor.action((ctx) => {
+      const serializer = ctx.get(serializerCtx)
+      const snapshot = ctx.get(editorViewCtx).state.doc
+      return () => serializer(snapshot)
+    })
+    emit('ready', {
+      sessionId: document.sessionId,
+      tree: props.tree,
+    })
+    ready.value = true
+    trackTransactions = true
+    canonicalizationHandle = window.requestIdleCallback(() => {
+      canonicalizationHandle = undefined
+      if (disposed || builder !== current || sequence !== documentSequence) return
+      try {
+        emit('canonicalized', {
+          sessionId: document.sessionId,
+          tree: props.tree,
+          canonicalMarkdown: serializeSnapshot(),
+        })
+      } catch (error) {
+        emit('failed', {
+          sessionId: document.sessionId,
+          message: error instanceof Error ? error.message : 'Milkdown could not serialize the document',
+        })
+      }
+    }, { timeout: 500 })
+  } catch (error) {
+    if (disposed || builder !== current) return
+    emit('failed', {
+      sessionId: document.sessionId,
+      message: error instanceof Error ? error.message : 'Milkdown could not load the document',
+    })
+  }
+}
+
 async function createEditor(): Promise<void> {
   const root = editorRoot.value
   if (!root) return
 
+  const initialDocument = requestedDocument
+
   const next = new CrepeBuilder({
     root,
-    defaultValue: props.initialMarkdown,
+    defaultValue: initialDocument.markdown,
   })
     .addFeature(blockEdit)
     .addFeature(toolbar)
@@ -92,19 +160,21 @@ async function createEditor(): Promise<void> {
       await next.destroy().catch(() => undefined)
       return
     }
-    emit('ready', {
-      sessionId: props.sessionId,
-      tree: props.tree,
-      canonicalMarkdown: next.getMarkdown(),
-    })
-    ready.value = true
-    trackTransactions = true
+    initialized = true
+    const latestDocument = requestedDocument
+    loadDocument(
+      next,
+      latestDocument,
+      latestDocument.sessionId !== initialDocument.sessionId
+        || latestDocument.markdown !== initialDocument.markdown,
+    )
   } catch (error) {
     if (disposed) return
+    initialized = false
     builder = undefined
     await next.destroy().catch(() => undefined)
     emit('failed', {
-      sessionId: props.sessionId,
+      sessionId: requestedDocument.sessionId,
       message: error instanceof Error ? error.message : 'Milkdown could not create the editor',
     })
   }
@@ -138,11 +208,22 @@ function capture(): EditorCapture {
   }
 }
 
+watch(
+  () => [props.sessionId, props.initialMarkdown] as const,
+  ([sessionId, markdown]) => {
+    requestedDocument = { sessionId, markdown }
+    if (initialized && builder) loadDocument(builder, requestedDocument, true)
+    else ready.value = false
+  },
+)
 watch(() => props.readOnly, (readOnly) => builder?.setReadonly(readOnly))
 
 onMounted(() => void createEditor())
 onBeforeUnmount(() => {
   disposed = true
+  initialized = false
+  documentSequence += 1
+  if (canonicalizationHandle !== undefined) window.cancelIdleCallback(canonicalizationHandle)
   trackTransactions = false
   const current = builder
   builder = undefined

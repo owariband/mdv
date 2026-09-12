@@ -36,6 +36,7 @@ body,
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -45,6 +46,7 @@ button {
 }
 
 button:focus-visible,
+input:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--document) 72%, white);
@@ -89,6 +91,7 @@ svg {
 }
 
 .tree-rail {
+  position: relative;
   display: grid;
   grid-column: 1;
   grid-template-rows: 44px minmax(0, 1fr) 44px;
@@ -149,7 +152,6 @@ svg {
 }
 
 .workspace-tree.is-busy {
-  opacity: 0.55;
   pointer-events: none;
 }
 
@@ -654,52 +656,112 @@ svg {
 }
 
 .sidebar-footer {
+  position: relative;
+  z-index: 41;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
   border-top: 1px solid var(--line);
+  background: var(--sidebar);
   -webkit-app-region: no-drag;
 }
 
-.sidebar-open {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 0 14px;
+.sidebar-footer button {
+  min-width: 0;
+  padding: 0;
   border: 0;
   color: var(--ink-faint);
   background: transparent;
   cursor: pointer;
 }
 
-.sidebar-open:hover:not(:disabled) {
+.sidebar-footer button:hover:not(:disabled),
+.sidebar-menu-button[aria-expanded="true"] {
   color: var(--ink);
   background: var(--surface);
 }
 
-.sidebar-open svg {
-  flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
+.sidebar-folder-button,
+.sidebar-menu-button {
+  display: grid;
+  place-items: center;
 }
 
-.sidebar-open span {
-  max-width: 0;
+.sidebar-folder-button svg,
+.sidebar-menu-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar-menu-button circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.sidebar-workspace-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px !important;
   overflow: hidden;
-  opacity: 0;
+  color: var(--ink-soft) !important;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 10px;
-  text-overflow: clip;
-  transform: translateX(-5px);
-  transition: max-width 140ms ease, opacity 120ms ease, transform 140ms ease;
+  font-weight: 520;
+}
+
+.sidebar-workspace-button span {
+  max-width: 100%;
+  overflow: hidden;
+  opacity: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sidebar-refresh {
-  position: relative;
+.workspace-drawer {
+  position: absolute;
+  z-index: 40;
+  right: 5px;
+  bottom: 43px;
+  left: 5px;
+  display: flex;
+  max-height: calc(100% - 54px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  background: var(--canvas);
+  box-shadow: 0 -12px 28px rgb(0 0 0 / 24%);
+  transform-origin: bottom;
+}
+
+.workspace-drawer-enter-active,
+.workspace-drawer-leave-active {
+  transition: opacity 120ms ease, transform 150ms cubic-bezier(0.22, 0.78, 0.24, 1);
+}
+
+.workspace-drawer-enter-from,
+.workspace-drawer-leave-to {
+  opacity: 0;
+  transform: translateY(7px) scaleY(0.985);
+}
+
+.workspace-drawer-header {
+  display: flex;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 7px 0 10px;
+  color: var(--ink-faint);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workspace-drawer-header button {
   display: grid;
-  width: 42px;
-  height: 43px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   place-items: center;
   border: 0;
@@ -708,35 +770,93 @@ svg {
   cursor: pointer;
 }
 
-.sidebar-refresh:hover:not(:disabled) {
-  color: var(--ink-strong);
-  background: var(--surface);
+.workspace-drawer-header button:hover {
+  color: var(--ink);
 }
 
-.sidebar-refresh svg {
+.workspace-drawer-header svg {
   width: 14px;
   height: 14px;
 }
 
-.sidebar-refresh.tooltip-trigger::after {
-  top: auto;
-  right: 6px;
-  bottom: calc(100% + 7px);
-  left: auto;
-  transform: translateY(3px);
+.workspace-drawer-actions {
+  padding: 1px 0 5px;
 }
 
-.sidebar-refresh.tooltip-trigger:hover::after,
-.sidebar-refresh.tooltip-trigger:focus-visible::after {
-  transform: translateY(0);
+.workspace-drawer-actions button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  width: 100%;
+  height: 27px;
+  align-items: center;
+  padding: 0 10px;
+  border: 0;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
 }
 
-.sidebar-open.prominent span,
-.tree-rail:hover .sidebar-open span,
-.sidebar-open:focus-visible span {
-  max-width: 100px;
-  opacity: 1;
-  transform: translateX(0);
+.workspace-drawer-actions button:hover:not(:disabled) {
+  color: var(--ink-strong);
+  background: var(--surface-hover);
+}
+
+.workspace-drawer-actions svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ink-faint);
+}
+
+.workspace-drawer-actions kbd {
+  color: var(--ink-faint);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+}
+
+.workspace-drawer-current {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.workspace-drawer-current > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
+.workspace-drawer-current > div {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 7px;
+  height: 26px;
+  align-items: center;
+  padding: 0 7px;
+  color: var(--ink-soft);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+.workspace-drawer-current svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ink-faint);
+}
+
+.workspace-drawer-current b {
+  overflow: hidden;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-drawer-current i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--reference);
 }
 
 .sidebar-resizer {
@@ -823,6 +943,13 @@ svg {
   justify-self: end;
   gap: 2px;
   -webkit-app-region: no-drag;
+}
+
+.window-action-slot {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
 }
 
 .icon-button {
@@ -934,12 +1061,13 @@ svg {
 .editor-stack {
   position: absolute;
   inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   background: var(--canvas);
 }
 
 .mdv-dual-stack {
-  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -953,6 +1081,10 @@ svg {
 
 .editor-pane.document {
   border-left: 1px solid var(--line);
+}
+
+.editor-pane.document.single {
+  border-left: 0;
 }
 
 .editor-pane-label {
@@ -1170,8 +1302,79 @@ svg {
   tab-size: 4;
 }
 
-.source-editor[readonly] {
+.workspace-name-layer {
+  position: fixed;
+  z-index: 320;
+  inset: 0;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-name-popover {
+  position: fixed;
+  display: grid;
+  width: 286px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  gap: 10px;
+  padding: 13px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 48%);
+}
+
+.workspace-name-popover label {
   color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workspace-name-popover input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  outline: 0;
+  color: var(--ink-strong);
+  background: var(--canvas);
+  font-size: 12px;
+}
+
+.workspace-name-popover input:focus {
+  border-color: color-mix(in srgb, var(--document) 74%, var(--line-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--document) 18%, transparent);
+}
+
+.workspace-name-popover > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.workspace-name-popover button {
+  min-width: 68px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+
+.workspace-name-popover button:hover {
+  border-color: #4a4f52;
+  background: #2b2e30;
+}
+
+.workspace-name-popover button.primary {
+  border-color: color-mix(in srgb, var(--document) 72%, var(--line-strong));
+  color: var(--ink-strong);
+  background: color-mix(in srgb, var(--document) 24%, var(--surface-raised));
 }
 
 .modal-backdrop {

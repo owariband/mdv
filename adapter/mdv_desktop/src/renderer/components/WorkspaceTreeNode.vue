@@ -2,6 +2,13 @@
 import { ref } from 'vue'
 import type { WorkspaceNodeView } from '../../shared/ipc.js'
 
+interface WorkspaceNodeContextRequest {
+  readonly node: WorkspaceNodeView
+  readonly clientX: number
+  readonly clientY: number
+  readonly trigger: HTMLElement
+}
+
 const props = defineProps<{
   node: WorkspaceNodeView
   depth: number
@@ -10,9 +17,36 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [node: WorkspaceNodeView]
+  context: [request: WorkspaceNodeContextRequest]
 }>()
 
 const expanded = ref(false)
+
+function showContextMenu(event: MouseEvent): void {
+  const trigger = event.currentTarget
+  if (!(trigger instanceof HTMLElement)) return
+  emit('context', {
+    node: props.node,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    trigger,
+  })
+}
+
+function showContextMenuFromKeyboard(event: KeyboardEvent): void {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  const trigger = event.currentTarget
+  if (!(trigger instanceof HTMLElement)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const bounds = trigger.getBoundingClientRect()
+  emit('context', {
+    node: props.node,
+    clientX: bounds.left + Math.min(32, bounds.width / 2),
+    clientY: bounds.top + bounds.height / 2,
+    trigger,
+  })
+}
 </script>
 
 <template>
@@ -22,10 +56,13 @@ const expanded = ref(false)
         class="workspace-row directory"
         type="button"
         role="treeitem"
+        aria-haspopup="menu"
         :style="{ '--tree-depth': depth }"
         :aria-expanded="expanded"
         :title="node.name"
         @click="expanded = !expanded"
+        @contextmenu.prevent.stop="showContextMenu"
+        @keydown="showContextMenuFromKeyboard"
       >
         <svg class="workspace-chevron" viewBox="0 0 16 16" aria-hidden="true">
           <path d="m5 3 5 5-5 5" />
@@ -44,6 +81,7 @@ const expanded = ref(false)
           :depth="depth + 1"
           :active-node-id="activeNodeId"
           @select="emit('select', $event)"
+          @context="emit('context', $event)"
         />
       </div>
     </template>
@@ -54,10 +92,13 @@ const expanded = ref(false)
       :class="[node.kind, { active: node.id === activeNodeId }]"
       type="button"
       role="treeitem"
+      aria-haspopup="menu"
       :style="{ '--tree-depth': depth }"
       :aria-label="node.name"
       :title="node.name"
       @click="emit('select', node)"
+      @contextmenu.prevent.stop="showContextMenu"
+      @keydown="showContextMenuFromKeyboard"
     >
       <span class="workspace-chevron" aria-hidden="true" />
       <svg class="workspace-kind-icon" viewBox="0 0 24 24" aria-hidden="true">
