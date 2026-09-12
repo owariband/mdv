@@ -1,5 +1,5 @@
 {
-  "name": "@mdv/desktop",
+  "name": "@owariband/milkdownv",
   "version": "0.1.0-preview.0",
   "description": "A focused Milkdown desktop editor for MDV documents",
   "private": true,

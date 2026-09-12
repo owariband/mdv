@@ -241,7 +241,7 @@ export function toDesktopFailure(error: unknown): DesktopFailure {
   }
   return {
     code: 'INTERNAL_ERROR',
-    message: 'MDV Desktop could not complete the operation.',
+    message: 'milkdownv could not complete the operation.',
   }
 }
 

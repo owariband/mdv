@@ -34,7 +34,7 @@ try {
     )
   )))
   const referenceMarkdown = '# Product reference\n\nStable source context for the working document.\n\n## Release constraints\n\n- Preserve both worktrees.\n- Confirm every Reference save.\n- Keep immutable history intact.\n'
-  const documentMarkdown = '# MDV desktop editor\n\nWrite against trusted context without hiding either side.\n\n## Split worktree\n\nReference stays visible on the left while the Document remains editable on the right.\n'
+  const documentMarkdown = '# milkdownv editor\n\nWrite against trusted context without hiding either side.\n\n## Split worktree\n\nReference stays visible on the left while the Document remains editable on the right.\n'
   let document = await createMdv(file)
   const referenceVersions = []
   const documentVersions = []
@@ -119,6 +119,13 @@ try {
   })
   await page.reload()
   await page.waitForSelector('.empty-document')
+  assert.deepEqual(await application.evaluate(({ app, BrowserWindow }) => ({
+    appName: app.getName(),
+    windowTitle: BrowserWindow.getAllWindows()[0]?.getTitle(),
+  })), {
+    appName: 'milkdownv',
+    windowTitle: 'milkdownv',
+  })
   assert.equal(await page.locator('.sidebar-mark').count(), 0)
   assert.equal(await page.locator('.sidebar-empty').count(), 0)
   assert.equal(await page.locator('.sidebar-header-action').count(), 0)
@@ -169,6 +176,10 @@ try {
     'workspaceId',
   ])
   assert.match(workspaceShape.value.root.id, /^n_[0-9a-f]{32}$/)
+  assert.equal(
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle()),
+    'Hypnos Notes — milkdownv',
+  )
 
   const markdownNode = workspaceShape.value.root.children.find((node) => node.name === 'README.md')
   assert.ok(markdownNode)
@@ -180,6 +191,10 @@ try {
   })
   assert.equal(markdownShape.ok, true)
   assert.equal(markdownShape.value.kind, 'markdown')
+  assert.equal(
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle()),
+    'README.md — milkdownv',
+  )
   assert.equal(JSON.stringify(markdownShape).includes(temporaryDirectory), false)
   assert.deepEqual(Object.keys(markdownShape.value).sort(), [
     'displayName',
@@ -213,6 +228,10 @@ try {
   assert.equal(openedShape.value.referenceRelation.kind, 'drifted')
   assert.equal(openedShape.value.referenceRelation.boundReference, referenceVersions[4])
   assert.equal(openedShape.value.referenceRelation.currentReference, referenceVersions[5])
+  assert.equal(
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle()),
+    'milkdown-demo.mdv — milkdownv',
+  )
 
   await page.getByRole('button', { name: 'Open a folder' }).click()
   await page.waitForSelector('.workspace-tree')
@@ -257,7 +276,7 @@ try {
   ])
   await page.waitForFunction(() => (
     document.querySelector('.editor-pane.reference .ProseMirror h1')?.textContent === 'Product reference'
-    && document.querySelector('.editor-pane.document .ProseMirror h1')?.textContent === 'MDV desktop editor'
+    && document.querySelector('.editor-pane.document .ProseMirror h1')?.textContent === 'milkdownv editor'
   ))
   assert.equal(await page.getByRole('button', { name: 'Worktree' }).count(), 1)
   assert.equal(await page.locator('.editor-layer.reference').count(), 1)

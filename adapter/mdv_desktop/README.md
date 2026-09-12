@@ -1,6 +1,6 @@
-# MDV Desktop
+# milkdownv
 
-A focused Milkdown desktop editor for `.mdv` documents that also edits ordinary `.md` files without exposing MDV-only controls. The P0 app provides a real end-to-end path through Electron Main and `@owariband/mdv`; the renderer never reads ZIP files or local paths directly.
+A quiet Milkdown desktop editor for `.mdv` documents that also edits ordinary `.md` files without exposing MDV-only controls. `milkdownv` is currently a source-build preview. The P0 app provides a real end-to-end path through Electron Main and `@owariband/mdv`; the renderer never reads ZIP files or local paths directly.
 
 ## P0 capabilities
 

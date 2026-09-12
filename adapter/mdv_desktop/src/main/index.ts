@@ -123,7 +123,7 @@ function registerIpc(): void {
           throw new FolderWorkspaceError('STALE_WORKSPACE', 'A newer workspace selection replaced this request.')
         }
         activeWorkspace = opened.workspace
-        if (!activeSession) window.setTitle(`${opened.view.root.name} — MDV`)
+        if (!activeSession) window.setTitle(`${opened.view.root.name} — milkdownv`)
         return { ok: true, value: opened.view }
       } catch (error) {
         report(error)
@@ -238,7 +238,7 @@ function registerIpc(): void {
 
 async function selectDocumentFile(window: BrowserWindow): Promise<string | undefined> {
   if (e2eDialogPlan) {
-    if (!e2eDialogPlan.openFile) throw new Error('The MDV desktop E2E dialog plan has no openFile')
+    if (!e2eDialogPlan.openFile) throw new Error('The milkdownv E2E dialog plan has no openFile')
     return e2eDialogPlan.openFile
   }
 
@@ -268,7 +268,7 @@ function selectedDocumentTarget(filePath: string): ResolvedWorkspaceDocument {
 
 async function selectWorkspaceDirectory(window: BrowserWindow): Promise<string | undefined> {
   if (e2eDialogPlan) {
-    if (!e2eDialogPlan.openDirectory) throw new Error('The MDV desktop E2E dialog plan has no openDirectory')
+    if (!e2eDialogPlan.openDirectory) throw new Error('The milkdownv E2E dialog plan has no openDirectory')
     return e2eDialogPlan.openDirectory
   }
 
@@ -298,7 +298,7 @@ async function activateDocument(
   activeSession = opened.kind === 'mdv'
     ? { kind: 'mdv', session: opened.session }
     : { kind: 'markdown', session: opened.session }
-  window.setTitle(`${opened.view.displayName} — MDV`)
+  window.setTitle(`${opened.view.displayName} — milkdownv`)
   return opened.view
 }
 
@@ -306,7 +306,7 @@ async function confirmReferenceSave(window: BrowserWindow, packagePath: string):
   if (e2eDialogPlan) {
     const response = e2eDialogPlan.referenceResponses[e2eReferenceResponse]
     if (response === undefined) {
-      throw new Error('The MDV desktop E2E dialog plan has no remaining Reference response')
+      throw new Error('The milkdownv E2E dialog plan has no remaining Reference response')
     }
     e2eReferenceResponse += 1
     return response === 1
@@ -399,14 +399,14 @@ function requireWorkspace(request: WorkspaceRequest): FolderWorkspace {
 
 function report(error: unknown): void {
   const failure = toPublicFailure(error)
-  console.error(`[mdv-desktop] ${failure.code}: ${failure.message}`)
+  console.error(`[milkdownv] ${failure.code}: ${failure.message}`)
 }
 
 function toPublicFailure(error: unknown): DesktopFailure {
   return toWorkspaceFailure(error) ?? toMarkdownFailure(error) ?? toDesktopFailure(error)
 }
 
-app.setName('MDV')
+app.setName('milkdownv')
 void app.whenReady().then(() => {
   registerIpc()
   mainWindow = createWindow()
